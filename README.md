@@ -1,4 +1,4 @@
-# AI 圓桌 v3.0｜工程協作版
+# AI 圓桌 v3.1｜正式版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -55,6 +55,25 @@ wrangler secret put TAVILY_API_KEY
 
 如果你的環境禁止外部 CDN，請改成把 JSZip 檔案自架到 `public/`。
 
+
+## 正式版 Web Search 驗證規則
+
+v3.1 將網路搜尋結果分成三層，避免「查得到」卻把推測講成事實：
+
+- **已證實**：有附件或 Web Search 來源直接支持。
+- **推測**：由已知事實推導出的合理解讀。
+- **待驗證**：來源不足、資料過舊、彼此衝突，或只是建議下一步查詢的項目。
+
+Reviewer 會特別檢查：
+
+- 日期是否對得上
+- 數字是否對得上
+- 是否把上漲誤寫成下跌
+- 是否把「建議再查」誤當成「已證實」
+- 來源彼此是否衝突
+
+最終整合會優先顯示已證實因素，並保留實際搜尋來源名稱或 URL 供核對。
+
 ## 部署
 
 原本 Cloudflare Workers with Static Assets 架構維持不變：
@@ -65,34 +84,7 @@ wrangler deploy
 
 ## 版本
 
-- v3.0.1：Tavily Secret runtime 診斷
+- v3.1：正式版；Web Search 已證實／推測／待驗證分流 + Reviewer 來源核實
 - v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP
 - v2.2：Tavily Web Search
 - v2.1：Workers with Static Assets 基礎架構
-
-## v3.0.1 Tavily Secret 診斷
-
-本版新增一個安全診斷欄位：
-
-```text
-hasTavilyKey: true / false
-```
-
-它只判斷 Worker runtime 是否讀得到 `TAVILY_API_KEY`，**不會回傳 Secret 值本身**。
-
-判讀方式：
-
-- `true`：Worker 已讀到 Secret。若 Web Search 仍失敗，就往 Tavily Key 驗證、額度或網路呼叫查。
-- `false`：Worker runtime 沒讀到 Secret。優先檢查 Cloudflare production environment / deployment / Secret 綁定。
-
-前端 Web Search 區塊也會直接顯示：
-
-```text
-✅ Worker 讀得到 TAVILY_API_KEY
-```
-
-或：
-
-```text
-❌ Worker 讀不到 TAVILY_API_KEY
-```
