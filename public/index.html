@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.0.1 Tavily 診斷版</title>
+<title>AI 圓桌 v3.1 正式版</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -36,7 +36,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 
 <div class="panel intro">
 <strong>工程模式：</strong>把 HTML / JS / CSS / JSON / MD / TXT / ZIP / PNG / JPG / WEBP 丟進來。<br>
-AI A 先修 → AI B Code Review → AI A 整合；若能安全修改，會產生可下載的修正版 ZIP。
+AI A 先修 → AI B Code Review → AI A 整合；Web Search 會區分已證實／推測／待驗證，若能安全修改，會產生可下載的修正版 ZIP。
 </div>
 
 <div class="panel">
@@ -59,7 +59,6 @@ AI A 先修 → AI B Code Review → AI A 整合；若能安全修改，會產�
   <span id="searchState" class="badge">OFF · 修程式通常不用搜尋</span>
 </div>
 <div class="small" style="margin-top:7px">需要查最新 API / 官方文件時再打開；搜尋來源使用 Tavily。</div>
-<div id="tavilyDiag" class="badge warn" style="margin-top:9px;display:inline-flex">Secret 狀態：尚未測試</div>
 </div>
 
 <div id="chat">
@@ -74,7 +73,7 @@ AI A 先修 → AI B Code Review → AI A 整合；若能安全修改，會產�
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.0.1 · Tavily Secret 診斷開啟</span>
+<span id="status" class="badge">v3.1 · 正式版</span>
 <div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
@@ -84,7 +83,7 @@ AI A 先修 → AI B Code Review → AI A 整合；若能安全修改，會產�
 const $=s=>document.querySelector(s);
 const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileStats"),
       q=$("#q"),send=$("#send"),status=$("#status"),chat=$("#chat"),
-      webSearch=$("#webSearch"),searchState=$("#searchState"),tavilyDiag=$("#tavilyDiag");
+      webSearch=$("#webSearch"),searchState=$("#searchState");
 
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","md","txt","xml","yaml","yml","toml","csv"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
@@ -197,6 +196,10 @@ function renderArtifact(artifact){
   lastArtifact=artifact;
   const lines=[];
   if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
+  if(Array.isArray(artifact.verified)&&artifact.verified.length)lines.push("已證實：\n- "+artifact.verified.join("\n- "));
+  if(Array.isArray(artifact.inferences)&&artifact.inferences.length)lines.push("推測：\n- "+artifact.inferences.join("\n- "));
+  if(Array.isArray(artifact.pending)&&artifact.pending.length)lines.push("待驗證：\n- "+artifact.pending.join("\n- "));
+  if(Array.isArray(artifact.sources)&&artifact.sources.length)lines.push("來源：\n- "+artifact.sources.join("\n- "));
   if(Array.isArray(artifact.review)&&artifact.review.length)lines.push("Reviewer 核對：\n- "+artifact.review.join("\n- "));
   if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
   const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
@@ -244,15 +247,7 @@ async function run(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
 
-    const hasKey = Boolean(d?.diagnostics?.hasTavilyKey);
-    tavilyDiag.textContent = hasKey ? "Secret 狀態：✅ Worker 讀得到 TAVILY_API_KEY" : "Secret 狀態：❌ Worker 讀不到 TAVILY_API_KEY";
-    tavilyDiag.className = "badge " + (hasKey ? "ok" : "warn");
-
-    if(webSearch.checked)addCard(
-      "card",
-      "🌐 Web Search",
-      `${searchLabel(d.search)}\n\n診斷：hasTavilyKey = ${hasKey ? "true" : "false"}`
-    );
+    if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
     if(Array.isArray(d.imageReports)&&d.imageReports.length){
       addCard("card","🖼️ 圖片分析",d.imageReports.map(x=>`${x.name}\n${x.text}`).join("\n\n"));
     }
