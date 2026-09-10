@@ -85,7 +85,7 @@ const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileSta
       q=$("#q"),send=$("#send"),status=$("#status"),chat=$("#chat"),
       webSearch=$("#webSearch"),searchState=$("#searchState");
 
-const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","md","txt","xml","yaml","yml","toml","csv"]);
+const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
 const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
 let workspace=new Map(); // path -> {path,kind,file,content?,binary?}
