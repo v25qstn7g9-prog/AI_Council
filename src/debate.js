@@ -1,21 +1,21 @@
 /**
- * debate.js — ai-council-v2.1-workers-clean
+ * debate.js — ai-council-v2.2-web-search
  *
  * POST /debate
  * body: { question: string }
  *
  * 流程固定三回合，不會無限互聊：
- *   1. MODEL_A 初答
+ *   0. （新增）用 Tavily 搜尋跟問題相關的網路資訊
+ *   1. MODEL_A 初答（拿得到搜尋結果就會參考）
  *   2. MODEL_B 審查、挑錯、補充
  *   3. MODEL_A 統整出「共識 / 分歧 / 結論」
  *
- * 相較 v1.0 的差異：
- * - 從 Pages Functions 改為 Workers with Static Assets（由 worker.js 路由進來）
- * - 新增速率限制：用 KV 記錄每個 IP 的呼叫次數，避免公開網址被亂打燒光 AI 額度
- * - 新增 Neurons 用量保護：可用環境變數關閉整個服務
+ * 相較 v2.1 的差異：
+ * - 新增 Tavily 網路搜尋，讓 AI 能參考即時資訊，不再只靠訓練時的舊知識
+ * - 沒有設定 TAVILY_API_KEY 時會自動跳過搜尋，照舊只憑自身知識回答，不會壞掉
  */
 
-const VERSION = "2.1-workers-clean";
+const VERSION = "2.2-web-search";
 
 const MODEL_A = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -48,6 +48,45 @@ async function ask(ai, model, messages, maxTokens = 650) {
   const t = txt(r);
   if (!t) throw new Error(model + " 沒有回傳文字");
   return t;
+}
+
+/**
+ * 用 Tavily 搜尋跟問題相關的網路資訊。
+ * 沒有設定 TAVILY_API_KEY 就直接回傳空字串，讓 AI 照舊只憑自身知識回答，
+ * 這樣就算沒申請 key，這個功能也不會讓整個服務壞掉。
+ */
+async function searchWeb(env, query) {
+  const apiKey = env.TAVILY_API_KEY;
+  if (!apiKey) return "";
+
+  try {
+    const r = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: "basic",
+        max_results: 5,
+        include_answer: false,
+      }),
+    });
+
+    if (!r.ok) return "";
+
+    const data = await r.json().catch(() => null);
+    const results = Array.isArray(data?.results) ? data.results : [];
+    if (results.length === 0) return "";
+
+    // 整理成簡短的條列格式，附上來源網址，方便 AI 引用、也方便使用者查證
+    return results
+      .slice(0, 5)
+      .map((item, i) => `${i + 1}. ${item.title || "（無標題）"}\n${item.content || ""}\n來源：${item.url || ""}`)
+      .join("\n\n");
+  } catch {
+    // 搜尋失敗（額度用完、網路問題等）就靜默放棄，讓圓桌照常進行
+    return "";
+  }
 }
 
 /**
@@ -100,6 +139,12 @@ export async function onRequestPost(context) {
     if (!q) return out({ error: "沒有收到問題" }, 400);
     if (q.length > MAX_Q) return out({ error: "問題太長" }, 400);
 
+    // 第 0 回合：搜尋網路資訊（沒設 key 就跳過，searchResults 會是空字串）
+    const searchResults = await searchWeb(env, q);
+    const searchNote = searchResults
+      ? `\n\n以下是搜尋到的網路資訊，可以參考但要自己判斷可信度，並在回答中註明是參考網路資料：\n${searchResults}`
+      : "";
+
     // 第一回合：A 先給出主分析
     const a = await ask(ai, MODEL_A, [
       {
@@ -107,7 +152,7 @@ export async function onRequestPost(context) {
         content:
           "你是AI圓桌主分析師。用繁體中文直接回答，區分事實、推論與不確定性，不知道就說不知道。",
       },
-      { role: "user", content: q },
+      { role: "user", content: q + searchNote },
     ]);
 
     // 第二回合：B 挑錯、補漏
@@ -117,7 +162,10 @@ export async function onRequestPost(context) {
         content:
           "你是AI圓桌反方審查員。用繁體中文。找出另一位分析師的盲點、錯誤假設與遺漏，但不要為反對而反對。",
       },
-      { role: "user", content: `原始問題：\n${q}\n\nAI A：\n${a}\n\n請審查並提出你的版本。` },
+      {
+        role: "user",
+        content: `原始問題：\n${q}${searchNote}\n\nAI A：\n${a}\n\n請審查並提出你的版本。`,
+      },
     ]);
 
     // 第三回合：A 當主持人統整
@@ -141,6 +189,7 @@ export async function onRequestPost(context) {
       a,
       b,
       final,
+      searched: Boolean(searchResults),
       labels: { a: "GPT-OSS 120B", b: "Qwen3 30B" },
     });
   } catch (e) {
