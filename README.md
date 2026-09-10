@@ -1,4 +1,4 @@
-# AI 圓桌 v3.6｜可插拔 AI 正式版
+# AI 圓桌 v3.7｜Cloudflare 自動切 Gemini 3.5 備援版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -23,9 +23,9 @@
 
 圖片會先被 Vision 模型轉成「UI / 錯誤畫面分析」，再交給兩個工程 AI；不會要求文字模型自己假裝看圖。
 
-## AI A：Gemini 2.5 Flash-Lite
+## AI A / B：Gemini 3.5 Flash-Lite 自動備援
 
-v3.6 將 AI A / AI B 改成「可插拔 Provider」。預設仍是 Cloudflare，不需要新增 API Key；未來可透過環境變數切換成 OpenAI（ChatGPT API）、Anthropic（Claude API）或 Gemini。非 Cloudflare Provider 失敗時，仍會退回 Cloudflare。
+v3.7 在可插拔 Provider 上再加入「Cloudflare → Gemini 3.5 Flash-Lite」自動備援。預設仍使用 Cloudflare；當 AI A 或 AI B 的 Cloudflare 呼叫失敗時，如果已設定 GEMINI_API_KEY，會自動切到 Gemini 3.5 Flash-Lite。若 Gemini 也失敗，才回報雙重錯誤。若手動把 Provider 設成 Gemini，則維持原本 Gemini → Cloudflare 備援。
 
 設定 Gemini Key（只有把 Provider 切到 Gemini 才需要）：
 
@@ -114,6 +114,8 @@ wrangler deploy
 
 ## 版本
 
+- v3.7：Cloudflare 失敗時自動切換 Gemini 3.5 Flash-Lite，A / B 皆支援；保留原本可插拔 Provider 與反向備援
+- v3.6：可插拔 AI Provider 正式版
 - v3.5：Gemini 主工程師 + Reviewer context budget + 最終完整檔案輸出上限提升 + 不可信附件/搜尋內容隔離 + 文件版本同步
 - v3.1：Web Search 已證實／推測／待驗證分流 + Reviewer 來源核實
 - v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP

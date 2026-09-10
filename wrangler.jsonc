@@ -48,7 +48,8 @@
   "vars": {
     "COUNCIL_RATE_LIMIT": "30:1800",
     "COUNCIL_ENABLED": "true",
-    "COUNCIL_A_PROVIDER": "gemini",
-    "COUNCIL_B_PROVIDER": "gemini"
+    "COUNCIL_A_PROVIDER": "cloudflare",
+    "COUNCIL_B_PROVIDER": "cloudflare",
+    "GEMINI_MODEL": "gemini-3.5-flash-lite"
   }
 }
