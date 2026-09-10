@@ -1,5 +1,265 @@
-<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b0d12"><title>AI 圓桌 v1.0</title><style>
-*{box-sizing:border-box}body{margin:0;background:#0b0d12;color:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.app{max-width:760px;margin:auto;min-height:100svh}header{position:sticky;top:0;background:#0b0d12e8;backdrop-filter:blur(14px);padding:18px 16px 12px;border-bottom:1px solid #242834;z-index:2}h1{font-size:21px;margin:0}.sub,.muted,.badge{font-size:12px;color:#9299aa}.chat{padding:16px 14px 160px}.card{margin-bottom:14px;padding:13px 14px;border:1px solid #2a2f3a;border-radius:18px;background:#141821;white-space:pre-wrap;line-height:1.55}.me{margin-left:42px;background:#1c2740}.a{border-left:3px solid #67a3ff}.b{border-left:3px solid #ffad66}.judge{border-left:3px solid #8ee6ad;background:#121d18}.err{border-color:#7b3434;background:#241516}.who{font-weight:700;font-size:13px;margin-bottom:6px}footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#0b0d12 24%);padding:30px 12px max(14px,env(safe-area-inset-bottom))}.composer{max-width:760px;margin:auto;background:#171b24;border:1px solid #303644;border-radius:22px;padding:10px}textarea{width:100%;min-height:70px;max-height:170px;resize:vertical;background:transparent;border:0;outline:0;color:#fff;font:inherit;padding:8px}.row{display:flex;gap:8px;align-items:center;justify-content:space-between}button{border:0;border-radius:14px;padding:10px 14px;font-weight:700;background:#f4f6fb;color:#10131a}.secondary{background:#242a36;color:#d8dce6}button:disabled{opacity:.45}</style></head><body>
-<div class="app"><header><h1>AI 圓桌</h1><div class="sub">GPT-OSS 120B × Qwen3 30B · 一題三回合</div></header><main id="chat" class="chat"><div class="card"><div class="who">圓桌規則</div><div class="muted">你問一題 → AI A 先分析 → AI B 挑錯補充 → AI A 最後統整。每題固定 3 次推論，不會無限互聊。🤣</div></div></main></div>
-<footer><div class="composer"><textarea id="q" maxlength="1800" placeholder="丟一個問題給兩隻 AI 吵一下…"></textarea><div class="row"><span id="status" class="badge">v1.0 · 不保存對話</span><div><button id="clear" class="secondary">清除</button> <button id="send">開會</button></div></div></div></footer>
-<script>const $=s=>document.querySelector(s),chat=$("#chat"),q=$("#q"),send=$("#send"),status=$("#status");function add(c,w,t){let d=document.createElement("div");d.className="card "+c;let a=document.createElement("div");a.className="who";a.textContent=w;let b=document.createElement("div");b.textContent=t;d.append(a,b);chat.append(d);scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}async function run(){let question=q.value.trim();if(!question||send.disabled)return;add("me","你",question);q.value="";send.disabled=true;status.textContent="兩隻 AI 開會中…";try{let r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question})}),d=await r.json().catch(()=>({}));if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);add("a",d.labels?.a||"AI A",d.a);add("b",d.labels?.b||"AI B",d.b);add("judge","圓桌結論",d.final);status.textContent=`完成 · ${d.version}`}catch(e){add("err","開會失敗",e.message);status.textContent="失敗"}finally{send.disabled=false;q.focus()}}send.onclick=run;q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}});$("#clear").onclick=()=>[...chat.querySelectorAll(".card")].slice(1).forEach(x=>x.remove());</script></body></html>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0b0d12"/>
+<title>AI 圓桌 v3.0 工程協作版</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+:root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.app{max-width:860px;margin:auto;padding:18px 14px 180px}header{padding:8px 2px 14px}h1{font-size:21px;margin:0 0 5px}.sub{font-size:12px;color:var(--sub)}
+.panel,.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:13px;margin:10px 0}
+.intro{font-size:13px;line-height:1.65;color:#d7dce7}.who{font-size:11px;font-weight:800;margin-bottom:7px;color:var(--sub)}
+.me{border-color:#4e5668}.a{border-color:#315c8e}.a .who{color:var(--a)}.b{border-color:#624486}.b .who{color:var(--b)}.judge{border-color:#806b37}.judge .who{color:var(--gold)}.err{border-color:#7b3434}.err .who{color:var(--bad)}
+pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font-size:13px;line-height:1.6}
+.drop{border:1px dashed #4b556a;border-radius:13px;padding:18px;text-align:center;color:var(--sub);cursor:pointer;background:#0f131a}.drop.drag{border-color:var(--gold);color:var(--gold)}
+.files{margin-top:10px;display:flex;flex-wrap:wrap;gap:7px}.chip{font-size:11px;padding:6px 8px;border-radius:10px;background:#10141b;border:1px solid var(--line);display:flex;gap:6px;align-items:center;max-width:100%}.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.chip button{padding:0;background:none;color:var(--bad);border:0}
+.small{font-size:11px;color:var(--sub);line-height:1.5}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.toggleWrap{display:flex;gap:7px;align-items:center;font-size:12px;color:#d8deea}.toggle{position:relative;width:42px;height:24px}.toggle input{display:none}.slider{position:absolute;inset:0;border-radius:999px;background:#353b48}.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.18s}.toggle input:checked+.slider{background:#2b8a57}.toggle input:checked+.slider:before{transform:translateX(18px)}
+.badge{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--sub)}.badge.ok{color:var(--ok);border-color:#2d6a46}.badge.warn{color:var(--warn);border-color:#725b2d}
+footer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,#0b0d12 14%);padding:22px 12px max(12px,env(safe-area-inset-bottom))}
+.composer{max-width:860px;margin:auto;background:#121720;border:1px solid var(--line);border-radius:16px;padding:10px}
+textarea{width:100%;height:78px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:7px}
+button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color:#17130a;font-weight:800;cursor:pointer}button.secondary{background:#262c38;color:#d9dfeb}button:disabled{opacity:.45}
+.outputActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+@media(max-width:520px){.app{padding-left:10px;padding-right:10px}.chip span{max-width:190px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+<h1>AI 圓桌 · 工程協作</h1>
+<div class="sub">主工程師 × Reviewer × Vision × Web Search · 整包修軟體</div>
+</header>
+
+<div class="panel intro">
+<strong>工程模式：</strong>把 HTML / JS / CSS / JSON / MD / TXT / ZIP / PNG / JPG / WEBP 丟進來。<br>
+AI A 先修 → AI B Code Review → AI A 整合；若能安全修改，會產生可下載的修正版 ZIP。
+</div>
+
+<div class="panel">
+<div class="who">專案附件</div>
+<div id="drop" class="drop">
+  點我選檔，或把檔案拖進來<br>
+  <span class="small">文字檔、ZIP、截圖都可；建議一次不要超過 30 個文字檔 / 4 張圖片</span>
+</div>
+<input id="picker" type="file" multiple hidden accept=".html,.htm,.js,.mjs,.cjs,.css,.json,.md,.txt,.xml,.yaml,.yml,.toml,.csv,.zip,image/png,image/jpeg,image/webp"/>
+<div id="files" class="files"></div>
+<div id="fileStats" class="small" style="margin-top:8px">尚未加入附件</div>
+</div>
+
+<div class="panel">
+<div class="row">
+  <label class="toggleWrap">
+    <span>🌐 Web Search</span>
+    <span class="toggle"><input id="webSearch" type="checkbox"><span class="slider"></span></span>
+  </label>
+  <span id="searchState" class="badge">OFF · 修程式通常不用搜尋</span>
+</div>
+<div class="small" style="margin-top:7px">需要查最新 API / 官方文件時再打開；搜尋來源使用 Tavily。</div>
+</div>
+
+<div id="chat">
+<div class="card">
+<div class="who">提示</div>
+<pre>例如：幫我檢查這整包為什麼首頁大盤不見了；只修必要檔案，其他不要動。附上的截圖是目前異常畫面。</pre>
+</div>
+</div>
+</div>
+
+<footer>
+<div class="composer">
+<textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
+<div class="row">
+<span id="status" class="badge">v3.0 · 本機附件只在這次請求中處理</span>
+<div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
+</div>
+</div>
+</footer>
+
+<script>
+const $=s=>document.querySelector(s);
+const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileStats"),
+      q=$("#q"),send=$("#send"),status=$("#status"),chat=$("#chat"),
+      webSearch=$("#webSearch"),searchState=$("#searchState");
+
+const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","md","txt","xml","yaml","yml","toml","csv"]);
+const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
+const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
+let workspace=new Map(); // path -> {path,kind,file,content?,binary?}
+let lastArtifact=null;
+
+function ext(name){const p=String(name).split(".");return p.length>1?p.pop().toLowerCase():""}
+function human(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB"}
+function addCard(cls,who,text){
+  const d=document.createElement("div");d.className="card "+cls;
+  const w=document.createElement("div");w.className="who";w.textContent=who;
+  const p=document.createElement("pre");p.textContent=text;
+  d.append(w,p);chat.append(d);scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+  return d;
+}
+function renderFiles(){
+  filesBox.innerHTML="";
+  let bytes=0, imgs=0, texts=0;
+  [...workspace.values()].forEach(x=>{
+    bytes+=x.file?.size||0;if(x.kind==="image")imgs++;if(x.kind==="text")texts++;
+    const c=document.createElement("div");c.className="chip";
+    const s=document.createElement("span");s.textContent=`${x.kind==="image"?"🖼️":"📄"} ${x.path}`;
+    const b=document.createElement("button");b.textContent="×";b.onclick=()=>{workspace.delete(x.path);renderFiles()};
+    c.append(s,b);filesBox.append(c);
+  });
+  stats.textContent=workspace.size?`${workspace.size} 個項目 · ${texts} 文字檔 · ${imgs} 圖片 · 原始 ${human(bytes)}`:"尚未加入附件";
+}
+async function readTextFile(file,path){
+  let content=await file.text();
+  workspace.set(path,{path,kind:"text",file,content});
+}
+async function readImage(file,path){
+  if([...workspace.values()].filter(x=>x.kind==="image").length>=MAX_IMAGES)throw Error(`圖片最多 ${MAX_IMAGES} 張`);
+  workspace.set(path,{path,kind:"image",file});
+}
+async function addLoose(file,path=file.name){
+  const e=ext(file.name);
+  if(TEXT_EXT.has(e))return readTextFile(file,path);
+  if(IMG_EXT.has(e))return readImage(file,path);
+  if(e==="zip")return addZip(file);
+  throw Error(`不支援：${file.name}`);
+}
+async function addZip(file){
+  if(typeof JSZip==="undefined")throw Error("JSZip 尚未載入，請重新整理後再試");
+  const z=await JSZip.loadAsync(file);
+  let count=0;
+  for(const [path,entry] of Object.entries(z.files)){
+    if(entry.dir)continue;
+    const e=ext(path);
+    if(TEXT_EXT.has(e)){
+      const content=await entry.async("string");
+      workspace.set(path,{path,kind:"text",file:new File([content],path),content});
+      count++;
+    }else if(IMG_EXT.has(e) && [...workspace.values()].filter(x=>x.kind==="image").length<MAX_IMAGES){
+      const blob=await entry.async("blob");
+      workspace.set(path,{path,kind:"image",file:new File([blob],path,{type:blob.type||`image/${e==="jpg"?"jpeg":e}`})});
+      count++;
+    }
+  }
+  if(!count)throw Error("ZIP 裡沒有可讀的文字檔或圖片");
+}
+async function ingest(list){
+  const errors=[];
+  for(const f of list){
+    try{await addLoose(f)}catch(e){errors.push(`${f.name}：${e.message}`)}
+  }
+  renderFiles();
+  if(errors.length)addCard("err","附件略過",errors.join("\n"));
+}
+drop.onclick=()=>picker.click();
+picker.onchange=async()=>{await ingest([...picker.files]);picker.value=""};
+["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("drag")}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("drag")}));
+drop.addEventListener("drop",e=>ingest([...e.dataTransfer.files]));
+
+webSearch.onchange=()=>{
+  searchState.textContent=webSearch.checked?"ON · 會先搜尋網路":"OFF · 修程式通常不用搜尋";
+  searchState.className="badge "+(webSearch.checked?"ok":"");
+};
+
+async function imageDataUrl(file){
+  if(file.size>2.5*1024*1024)throw Error(`${file.name} 超過 2.5MB，請先縮圖`);
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error("圖片讀取失敗"));r.readAsDataURL(file);
+  });
+}
+function buildPayloadFiles(){
+  let total=0;const arr=[];
+  for(const x of workspace.values()){
+    if(x.kind!=="text")continue;
+    let c=String(x.content||"");
+    const remaining=Math.max(0,MAX_TOTAL_CHARS-total);
+    if(!remaining)break;
+    c=c.slice(0,Math.min(MAX_TEXT_CHARS,remaining));total+=c.length;
+    arr.push({path:x.path,content:c,size:String(x.content||"").length});
+  }
+  return arr;
+}
+async function buildPayloadImages(){
+  const arr=[];
+  for(const x of workspace.values()){
+    if(x.kind!=="image")continue;
+    arr.push({name:x.path,dataUrl:await imageDataUrl(x.file)});
+  }
+  return arr;
+}
+function renderArtifact(artifact){
+  if(!artifact)return;
+  lastArtifact=artifact;
+  const lines=[];
+  if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
+  if(Array.isArray(artifact.review)&&artifact.review.length)lines.push("Reviewer 核對：\n- "+artifact.review.join("\n- "));
+  if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
+  const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
+  if(Array.isArray(artifact.files)&&artifact.files.length){
+    const actions=document.createElement("div");actions.className="outputActions";
+    const zipBtn=document.createElement("button");zipBtn.textContent=`下載修正版 ZIP（${artifact.files.length} 檔修改）`;
+    zipBtn.onclick=()=>downloadPatchedZip(artifact);
+    actions.append(zipBtn);c.append(actions);
+  }
+}
+async function downloadPatchedZip(artifact){
+  if(typeof JSZip==="undefined")return alert("JSZip 尚未載入");
+  const z=new JSZip();
+  // Preserve uploaded text/image workspace first.
+  for(const x of workspace.values()){
+    if(x.kind==="text")z.file(x.path,x.content||"");
+    else if(x.kind==="image")z.file(x.path,await x.file.arrayBuffer());
+  }
+  // Apply final complete-file replacements/new files.
+  for(const f of artifact.files||[]){
+    if(!f?.path||typeof f.content!=="string")continue;
+    z.file(String(f.path).replace(/^\/+/,""),f.content);
+  }
+  const blob=await z.generateAsync({type:"blob",compression:"DEFLATE"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="AI圓桌_修正版專案.zip";a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+}
+function searchLabel(s){
+  if(!s)return "搜尋狀態未知";
+  if(s.used)return `已搜尋 · ${s.resultCount||0} 筆`;
+  const m={no_api_key:"缺 TAVILY_API_KEY",auth_failed:"Tavily Key 驗證失敗",quota_or_rate_limit:"Tavily 額度/速率限制",network_error:"Tavily 連線失敗",no_results:"搜尋完成但無結果",disabled_by_user:"本題未搜尋"};
+  return m[s.reason]||s.message||"未搜尋";
+}
+async function run(){
+  const question=q.value.trim();
+  if(!question||send.disabled)return;
+  send.disabled=true;lastArtifact=null;
+  addCard("me","你",question);
+  status.textContent="整理附件…";
+  try{
+    const files=buildPayloadFiles();
+    const images=await buildPayloadImages();
+    status.textContent=`工程會議中 · ${files.length} 檔 + ${images.length} 圖…`;
+    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
+
+    if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
+    if(Array.isArray(d.imageReports)&&d.imageReports.length){
+      addCard("card","🖼️ 圖片分析",d.imageReports.map(x=>`${x.name}\n${x.text}`).join("\n\n"));
+    }
+    addCard("a",d.labels?.a||"主工程師 A",d.a);
+    addCard("b",d.labels?.b||"Reviewer B",d.b);
+    if(d.artifact)renderArtifact(d.artifact);
+    else addCard("judge","最終整合",d.final||"已完成");
+    status.textContent=`完成 · ${d.version}`;
+  }catch(e){
+    addCard("err","工程會議失敗",e.message);status.textContent="失敗";
+  }finally{send.disabled=false;q.focus()}
+}
+send.onclick=run;
+q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}});
+$("#clear").onclick=()=>[...chat.querySelectorAll(".card")].slice(1).forEach(x=>x.remove());
+renderFiles();
+</script>
+</body>
+</html>
