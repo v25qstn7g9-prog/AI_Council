@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8.1-gemini35-fast-fallback";
+const VERSION = "3.8.2-real-error-visible";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -245,8 +245,14 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    try {
+      const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+      return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    } catch (ce) {
+      // 兩條路都失敗時，把「主 Provider 的失敗原因」一起帶出來，
+      // 否則只會看到 Cloudflare 的訊息，永遠查不到主 Provider 為何失敗。
+      throw new Error(`${provider} 失敗：${String(e?.message || e || "")}｜Cloudflare 備援也失敗：${String(ce?.message || ce || "")}`);
+    }
   }
 }
 
@@ -265,8 +271,12 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    try {
+      const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+      return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    } catch (ce) {
+      throw new Error(`${provider} 失敗：${String(e?.message || e || "")}｜Cloudflare 備援也失敗：${String(ce?.message || ce || "")}`);
+    }
   }
 }
 
@@ -649,8 +659,13 @@ ${b}
     });
   } catch (e) {
     const s = String(e?.message || e || "");
+    // 只有「純粹是 Cloudflare 額度問題」才顯示那句俏皮話；
+    // 只要訊息裡含有其他 Provider 的失敗原因，就原樣顯示，
+    // 免得真正的根因（例如 Gemini 的 HTTP 400）被蓋掉查不到。
+    const onlyCloudflareQuota =
+      /neuron|quota|limit|exceeded|usage/i.test(s) && !/｜|gemini|openai|anthropic/i.test(s);
     return out({
-      error:/neuron|quota|limit|exceeded|usage/i.test(s)
+      error: onlyCloudflareQuota
         ? "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂"
         : s || "AI 工程圓桌執行失敗"
     }, 500);
