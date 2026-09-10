@@ -18,7 +18,7 @@
  * 3. AI A = 整合工程師：輸出最終結論 + 可下載的完整檔案替換內容
  */
 
-const VERSION = "3.0.1-tavily-diagnostic";
+const VERSION = "3.1-stable";
 const MODEL_A = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -29,14 +29,6 @@ const MAX_FILE_CHARS = 30000;
 const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
 const DEFAULT_RATE_LIMIT = "8:1800";
-
-function hasTavilySecret(env) {
-  try {
-    return Boolean(env && env.TAVILY_API_KEY);
-  } catch {
-    return false;
-  }
-}
 
 function out(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -251,7 +243,15 @@ ${searchNote}
 3. 提出最小必要修改，不要無故重構。
 4. 若能從已提供檔案直接修，請明確列出每個要改的檔案與修改內容。
 5. 注意相容性、安全性、部署環境與現有功能不要被破壞。
-6. 如果資料不足，明確寫出缺什麼。`;
+6. 如果資料不足，明確寫出缺什麼。
+7. 若本題使用 Web Search，必須把外部資訊分成：
+   【已證實】有明確來源直接支持的事實；
+   【推測】根據已知事實做出的合理推論；
+   【待驗證】目前沒有足夠來源支持、還需要查證的說法。
+8. 不得把「建議再查什麼」寫成「已經發生的原因」。
+9. 涉及日期、價格、指數、公司公告、政策、財經事件等可變資訊時，必須優先使用搜尋結果中的具體日期與來源，不得用模型記憶補空白。
+10. 若來源彼此衝突，要明確指出衝突，不可自行選一個當真。
+11. 引用 Web Search 資料時，盡量保留來源名稱或 URL，讓使用者能核對。`;
 
     const a = await ask(env.AI, MODEL_A, [
       { role:"system", content:"你是資深全端工程師，擅長 HTML/JS/Cloudflare/Vercel、除錯、版本整合。用繁體中文，精準務實。" },
@@ -274,6 +274,10 @@ ${a}
 - 是否可能破壞既有功能
 - 是否有部署 / API / 安全 / 大小限制問題
 - 修改是否能更小、更穩
+- 若有 Web Search：每一個外部事實是否真的被來源支持
+- 是否把「推測 / 待驗證」誤寫成「已證實」
+- 是否存在日期不符、來源過舊、數字對不上、把上漲寫成下跌等問題
+- 若來源不足，必須要求降級成「待驗證」，不可硬下結論
 最後給出「必修 / 建議 / 不要改」三區。`;
 
     const b = await ask(env.AI, MODEL_B, [
@@ -301,6 +305,10 @@ ${b}
 {
   "summary": "簡短結論",
   "rootCause": "根因；若不確定要寫不確定",
+  "verified": ["已被附件或 Web Search 來源直接支持的事實"],
+  "inferences": ["合理推測；若沒有就空陣列"],
+  "pending": ["仍需驗證的事項；若沒有就空陣列"],
+  "sources": ["來源名稱或 URL；若本題未用 Web Search 可空陣列"],
   "review": ["核對重點1","核對重點2"],
   "instructions": ["使用者接下來要做的事"],
   "files": [
@@ -314,7 +322,12 @@ ${b}
 - files 可為空陣列。
 - 不得省略檔案內容或用「其餘不變」。
 - 不能把圖片當文字檔輸出。
-- 不要把 API Key / Secret 寫入檔案。`;
+- 不要把 API Key / Secret 寫入檔案。
+- 若有 Web Search，verified / inferences / pending 必須嚴格分流，不得混寫。
+- sources 只列實際出現在搜尋資料裡的來源，不得捏造 URL。
+- 外部資訊若沒有來源直接支持，就只能放 inferences 或 pending，不能放 verified。
+- 「建議下一步查詢」不能被寫成已發生事實。
+- 最終摘要要優先呈現已證實因素；推測與待驗證放後面。`;
 
     const finalRaw = await ask(env.AI, MODEL_A, [
       { role:"system", content:"你是軟體專案最終整合工程師。嚴格輸出有效 JSON。" },
@@ -336,10 +349,6 @@ ${b}
       filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
       imageReports,
       webSearchRequested,
-      diagnostics: {
-        hasTavilyKey: hasTavilySecret(env),
-        environment: "runtime",
-      },
       search:{
         ok:Boolean(search.ok), used:Boolean(search.used),
         reason:search.reason, message:search.message,
@@ -350,10 +359,6 @@ ${b}
   } catch (e) {
     const s = String(e?.message || e || "");
     return out({
-      diagnostics: {
-        hasTavilyKey: hasTavilySecret(context?.env),
-        environment: "runtime",
-      },
       error:/neuron|quota|limit|exceeded|usage/i.test(s)
         ? "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂"
         : s || "AI 工程圓桌執行失敗"
