@@ -1,91 +1,70 @@
-# AI 圓桌 v2.1
+# AI 圓桌 v3.0｜工程協作版
 
-兩隻 Cloudflare Workers AI 模型互相審查，最後統整出結論。
+這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
-## 架構
+## 可以做什麼
 
-```text
-ai-council/
-├─ src/
-│  ├─ worker.js          # Worker 入口與路由
-│  └─ debate.js          # 三回合 AI 圓桌 + 限流
-├─ public/
-│  └─ index.html         # 前端靜態頁面
-├─ wrangler.jsonc        # Cloudflare 設定
-├─ README.md
-└─ .gitignore
+- 上傳 HTML / JS / CSS / JSON / MD / TXT / XML / YAML / CSV
+- 上傳 ZIP 專案：瀏覽器端解壓並讀取可分析的文字檔
+- 上傳 PNG / JPG / WEBP 截圖
+- 可選 Web Search（Tavily）
+- AI A：主工程師
+- AI B：Code Reviewer
+- AI A：最終整合
+- 若最終模型能安全產生完整檔案內容，前端可直接下載「修正版 ZIP」
+
+## 圖片
+
+圖片使用 Cloudflare Workers AI：
+
+`@cf/meta/llama-3.2-11b-vision-instruct`
+
+第一次使用這個 Vision 模型前，Cloudflare 目前要求先接受 Meta License。請依 Cloudflare 官方說明完成一次 `prompt: "agree"`。
+
+圖片會先被 Vision 模型轉成「UI / 錯誤畫面分析」，再交給兩個工程 AI；不會要求文字模型自己假裝看圖。
+
+## Web Search
+
+需要最新 API / 官方文件時才打開 Web Search。
+
+設定：
+
+```bash
+wrangler secret put TAVILY_API_KEY
 ```
 
-v2.1 已完全移除舊的 Pages Functions `functions/` 結構：
-- `main` → `src/worker.js`
-- Static Assets → `./public`
-- `/debate` → `src/worker.js` 路由到 `src/debate.js`
-- 其他網址 → `env.ASSETS.fetch(request)`
+未設定 Key 時，工程圓桌仍可以正常使用，只是沒有網路搜尋。
 
-## 圓桌規則
+## 附件限制（v3.0）
 
-每題固定三回合：
-1. GPT-OSS 120B：主分析
-2. Qwen3 30B：挑錯、補漏
-3. GPT-OSS 120B：統整「共識 / 分歧 / 結論」
+為避免一次把 Workers AI context 塞爆：
 
-每題共 3 次 AI 推論，不會無限互聊。
+- 文字檔最多 30 個
+- 單一文字檔最多送 30,000 字元
+- 全部文字附件合計最多 180,000 字元
+- 圖片最多 4 張
+- 單張圖片前端限制約 2.5 MB
 
-## 模型
+大專案建議只上傳和問題相關的檔案，或先打包精簡版。
 
-| 角色 | 模型 | 呼叫次數 |
-|---|---|---:|
-| A 主分析 + 主持 | `@cf/openai/gpt-oss-120b` | 2 |
-| B 反方審查 | `@cf/qwen/qwen3-30b-a3b-fp8` | 1 |
+## ZIP 實作
+
+前端使用 JSZip CDN 解壓 / 重新打包：
+
+`https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js`
+
+如果你的環境禁止外部 CDN，請改成把 JSZip 檔案自架到 `public/`。
 
 ## 部署
 
-### 1. 建立 KV namespace
-
-```bash
-wrangler kv namespace create "council_kv"
-```
-
-把 Cloudflare 回傳的 ID 填進 `wrangler.jsonc`：
-
-```jsonc
-"kv_namespaces": [
-  { "binding": "council_kv", "id": "你的 KV namespace id" }
-]
-```
-
-### 2. AI Binding
-
-`wrangler.jsonc` 已設定：
-
-```jsonc
-"ai": { "binding": "AI" }
-```
-
-### 3. 部署
+原本 Cloudflare Workers with Static Assets 架構維持不變：
 
 ```bash
 wrangler deploy
 ```
 
-也可以把整個專案放到 GitHub，再由 Cloudflare Workers 連接 Git 自動部署。
-
-## 環境變數
-
-| 變數 | 預設 | 說明 |
-|---|---|---|
-| `COUNCIL_RATE_LIMIT` | `10:1800` | 每 IP 30 分鐘最多 10 題；`0:0` 關閉 |
-| `COUNCIL_ENABLED` | `true` | 設成 `false` 可立即休會 |
-
-## 額度保護
-
-1. 固定三回合，不會無限對話。
-2. KV 依 IP 限制題數。
-3. `COUNCIL_ENABLED=false` 可立即停用 AI。
-4. 額度相關錯誤會轉成較易懂的中文訊息。
-
 ## 版本
 
-- **v2.1** — 改成乾淨的 `src/ + public/` Workers 架構
-- **v2.0** — Workers with Static Assets + KV 限流
-- **v1.0** — Pages Functions 初版
+- v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP
+- v2.2：Tavily Web Search
+- v2.1：Workers with Static Assets 基礎架構

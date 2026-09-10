@@ -2,14 +2,48 @@
   "name": "ai-council",
   "compatibility_date": "2025-01-01",
   "main": "src/worker.js",
+
+  // ============================================
+  // AI 綁定 (Cloudflare AI)
+  // ============================================
+  // 名稱必須是 "AI"，src/debate.js 讀的是 env.AI
   "ai": {
     "binding": "AI"
   },
+
+  // ============================================
+  // 靜態資源 (Workers with Static Assets)
+  // ============================================
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+
+  // ============================================
+  // 速率限制用的 KV
+  // ============================================
+  // 建立方式：wrangler kv namespace create "council_kv"
+  // 或在 Cloudflare Dashboard → Storage & Databases → KV 手動建立，
+  // 然後把拿到的 id 填進下面。
+  //
+  // 沒綁也不會壞：debate.js 找不到 council_kv 時會自動退化成「不限制」，
+  // 但那樣公開網址就沒有防亂打的保護，建議還是綁上。
+  "kv_namespaces": [
+    { "binding": "council_kv", "id": "651bbecd5c8e4303a221a6ab96ea0a06" }
+  ],
+
+  // ============================================
+  // Web Search（選用）
+  // ============================================
+  // 請用 Secret 設定：
+  //   wrangler secret put TAVILY_API_KEY
+
+  // ============================================
+  // 環境變數
+  // ============================================
+  // COUNCIL_RATE_LIMIT：格式 "次數:秒數"，"10:1800" = 30 分鐘內 10 次
+  // COUNCIL_ENABLED：設 "false" 可臨時休會（例如 AI 額度快用完時）
   "vars": {
     "COUNCIL_RATE_LIMIT": "10:1800",
     "COUNCIL_ENABLED": "true"
