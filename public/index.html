@@ -302,6 +302,7 @@ async function run(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
 
+    if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
     if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
     if(Array.isArray(d.imageReports)&&d.imageReports.length){
       addCard("card","🖼️ 圖片分析",d.imageReports.map(x=>`${x.name}\n${x.text}`).join("\n\n"));
