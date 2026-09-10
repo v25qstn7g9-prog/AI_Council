@@ -2,24 +2,16 @@
   "name": "ai-council",
   "compatibility_date": "2025-01-01",
   "main": "src/worker.js",
-
   "ai": {
     "binding": "AI"
   },
-
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
-
-  "kv_namespaces": [
-    { "binding": "council_kv", "id": "651bbecd5c8e4303a221a6ab96ea0a06" }
-  ],
-
   "vars": {
     "COUNCIL_RATE_LIMIT": "10:1800",
     "COUNCIL_ENABLED": "true"
   }
 }
-
