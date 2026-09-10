@@ -18,7 +18,7 @@
  * 3. AI A = 整合工程師：輸出最終結論 + 可下載的完整檔案替換內容
  */
 
-const VERSION = "3.0-engineering-collab";
+const VERSION = "3.0.1-tavily-diagnostic";
 const MODEL_A = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -29,6 +29,14 @@ const MAX_FILE_CHARS = 30000;
 const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
 const DEFAULT_RATE_LIMIT = "8:1800";
+
+function hasTavilySecret(env) {
+  try {
+    return Boolean(env && env.TAVILY_API_KEY);
+  } catch {
+    return false;
+  }
+}
 
 function out(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -328,6 +336,10 @@ ${b}
       filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
       imageReports,
       webSearchRequested,
+      diagnostics: {
+        hasTavilyKey: hasTavilySecret(env),
+        environment: "runtime",
+      },
       search:{
         ok:Boolean(search.ok), used:Boolean(search.used),
         reason:search.reason, message:search.message,
@@ -338,6 +350,10 @@ ${b}
   } catch (e) {
     const s = String(e?.message || e || "");
     return out({
+      diagnostics: {
+        hasTavilyKey: hasTavilySecret(context?.env),
+        environment: "runtime",
+      },
       error:/neuron|quota|limit|exceeded|usage/i.test(s)
         ? "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂"
         : s || "AI 工程圓桌執行失敗"
