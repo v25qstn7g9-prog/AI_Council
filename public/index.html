@@ -61,6 +61,17 @@ AI A 先修 → AI B Code Review → AI A 整合；Web Search 會區分已證實
 <div class="small" style="margin-top:7px">需要查最新 API / 官方文件時再打開；搜尋來源使用 Tavily。</div>
 </div>
 
+<div class="panel">
+<div class="row">
+  <label class="toggleWrap">
+    <span>💬 閒聊模式</span>
+    <span class="toggle"><input id="chatMode" type="checkbox"><span class="slider"></span></span>
+  </label>
+  <span id="chatModeState" class="badge">OFF · 完整工程審查（較慢，較仔細）</span>
+</div>
+<div class="small" style="margin-top:7px">只是想讓兩隻 AI 一起聊聊、不牽涉程式碼時打開；回覆更快更短，不會產生修正檔案。</div>
+</div>
+
 <div id="chat">
 <div class="card">
 <div class="who">提示</div>
@@ -83,13 +94,15 @@ AI A 先修 → AI B Code Review → AI A 整合；Web Search 會區分已證實
 const $=s=>document.querySelector(s);
 const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileStats"),
       q=$("#q"),send=$("#send"),status=$("#status"),chat=$("#chat"),
-      webSearch=$("#webSearch"),searchState=$("#searchState");
+      webSearch=$("#webSearch"),searchState=$("#searchState"),
+      chatModeEl=$("#chatMode"),chatModeState=$("#chatModeState");
 
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
 const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
 let workspace=new Map(); // path -> {path,kind,file,content?,binary?}
 let lastArtifact=null;
+let chatHistory=[]; // 閒聊模式用：[{who:"you"|"a"|"b",text}]，跟著對話累積
 
 function ext(name){const p=String(name).split(".");return p.length>1?p.pop().toLowerCase():""}
 function human(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB"}
@@ -133,6 +146,9 @@ async function addZip(file){
   let count=0;
   for(const [path,entry] of Object.entries(z.files)){
     if(entry.dir)continue;
+    // 過濾 macOS 壓縮產生的垃圾檔（__MACOSX/ 資料夾、._ 開頭的隱藏檔、.DS_Store）
+    const base=path.split("/").pop()||"";
+    if(path.startsWith("__MACOSX/")||base.startsWith("._")||base===".DS_Store")continue;
     const e=ext(path);
     if(TEXT_EXT.has(e)){
       const content=await entry.async("string");
@@ -163,6 +179,10 @@ drop.addEventListener("drop",e=>ingest([...e.dataTransfer.files]));
 webSearch.onchange=()=>{
   searchState.textContent=webSearch.checked?"ON · 會先搜尋網路":"OFF · 修程式通常不用搜尋";
   searchState.className="badge "+(webSearch.checked?"ok":"");
+};
+chatModeEl.onchange=()=>{
+  chatModeState.textContent=chatModeEl.checked?"ON · 快速閒聊（不修程式）":"OFF · 完整工程審查（較慢，較仔細）";
+  chatModeState.className="badge "+(chatModeEl.checked?"ok":"");
 };
 
 async function imageDataUrl(file){
@@ -239,6 +259,25 @@ async function run(){
   send.disabled=true;lastArtifact=null;
   q.value="";
   addCard("me","你",question);
+  const isChat=chatModeEl.checked;
+
+  if(isChat){
+    status.textContent="聊天中…";
+    try{
+      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
+      addCard("a",d.labels?.a||"AI A",d.a);
+      addCard("b",d.labels?.b||"AI B",d.b);
+      chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
+      if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
+      status.textContent=`完成 · ${d.version}`;
+    }catch(e){
+      addCard("err","聊天失敗",e.message);status.textContent="失敗";
+    }finally{send.disabled=false;q.focus()}
+    return;
+  }
+
   status.textContent="整理附件…";
   try{
     const files=buildPayloadFiles();
@@ -263,7 +302,7 @@ async function run(){
 }
 send.onclick=run;
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
-$("#clear").onclick=()=>[...chat.querySelectorAll(".card")].slice(1).forEach(x=>x.remove());
+$("#clear").onclick=()=>{[...chat.querySelectorAll(".card")].slice(1).forEach(x=>x.remove());chatHistory=[]};
 renderFiles();
 </script>
 </body>
