@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.3-chat-history
+ * debate.js — ai-council-v3.6-pluggable-ai
  *
  * POST /debate
  * body:
@@ -24,9 +24,10 @@
  * 2. AI B 自然接話（可補充、可有不同意見，也會參考 history）
  * 不做總結收尾，不處理檔案、不要求 JSON、token 上限低很多，速度快上不少。
  *
- * v3.5 更新：AI A（主 AI）改用 Gemini 2.5（走 Google API，不吃 Cloudflare AI 額度），
- * AI B 繼續留在 Cloudflare。若沒設定 GEMINI_API_KEY 或呼叫失敗，
- * 自動退回 Cloudflare 的 MODEL_A_FALLBACK，不會讓功能壞掉。
+ * v3.6 可插拔 Provider：AI A / AI B 可各自透過環境變數
+ * COUNCIL_A_PROVIDER / COUNCIL_B_PROVIDER 切換成 cloudflare / gemini /
+ * openai / anthropic，預設維持免費的 Cloudflare。非 Cloudflare Provider
+ * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
 const VERSION = "3.6-pluggable-ai";
@@ -438,7 +439,7 @@ export async function onRequestPost(context) {
         chatMode:true,
         labels:{ a:aResult.source, b:bResult.source },
         a, b,
-        debug:aResult.debug,
+        debug:[aResult.debug, bResult.debug].filter(Boolean).join("\n") || undefined,
       });
     }
 
@@ -587,6 +588,7 @@ ${b}
       a, b,
       final:finalText,
       artifact,
+      debug:[aResult.debug, bResult.debug, finalResult.debug].filter(Boolean).join("\n") || undefined,
       filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
       imageReports,
       webSearchRequested,
