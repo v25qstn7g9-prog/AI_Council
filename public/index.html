@@ -237,6 +237,7 @@ async function run(){
   const question=q.value.trim();
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
+  q.value="";
   addCard("me","你",question);
   status.textContent="整理附件…";
   try{
@@ -261,7 +262,7 @@ async function run(){
   }finally{send.disabled=false;q.focus()}
 }
 send.onclick=run;
-q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();run()}});
+q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 $("#clear").onclick=()=>[...chat.querySelectorAll(".card")].slice(1).forEach(x=>x.remove());
 renderFiles();
 </script>
