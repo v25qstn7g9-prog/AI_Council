@@ -42,10 +42,10 @@
   // ============================================
   // 環境變數
   // ============================================
-  // COUNCIL_RATE_LIMIT：格式 "次數:秒數"，"10:1800" = 30 分鐘內 10 次
+  // COUNCIL_RATE_LIMIT：格式 "次數:秒數"，"30:1800" = 30 分鐘內 30 次
   // COUNCIL_ENABLED：設 "false" 可臨時休會（例如 AI 額度快用完時）
   "vars": {
-    "COUNCIL_RATE_LIMIT": "10:1800",
+    "COUNCIL_RATE_LIMIT": "30:1800",
     "COUNCIL_ENABLED": "true"
   }
 }
