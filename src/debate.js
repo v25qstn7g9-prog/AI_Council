@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8-gemini35-fast-fallback";
+const VERSION = "3.8.1-gemini35-fast-fallback";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -55,8 +55,8 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 // 主 Provider 卡住時，不要苦等，超過就直接切備援。
 // 這是「切換備援太久」的解法：以前失敗要等到平台自己放棄（可能數十秒），
 // 現在最多等 PRIMARY_TIMEOUT_MS 就換手。
-const PRIMARY_TIMEOUT_MS = 12000;   // 主 Provider 等 12 秒
-const FALLBACK_TIMEOUT_MS = 20000;  // 備援放寬到 20 秒，避免剛切過去又被砍掉
+const PRIMARY_TIMEOUT_MS = 6000;    // 主 Provider 等 6 秒，超時立即切 Gemini
+const FALLBACK_TIMEOUT_MS = 12000;  // Gemini 備援最多等 12 秒
 
 /**
  * 給任何 Promise 加上逾時。時間到就丟出錯誤，讓外層的 catch 立刻走備援流程。
