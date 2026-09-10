@@ -116,16 +116,17 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35)
  */
 async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
   const apiKey = await getGeminiKey(env);
-  if (apiKey) {
-    try {
-      const text = await askGemini(apiKey, messages, maxTokens, temperature);
-      return { text, source: "Gemini 2.5" };
-    } catch (e) {
-      // Gemini 失敗就默默退回 Cloudflare，不中斷使用者的請求
-    }
+  if (!apiKey) {
+    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
+    return { text, source: "GPT-OSS 120B（Gemini 備援）", debug: "沒有讀到 GEMINI_API_KEY" };
   }
-  const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
-  return { text, source: "GPT-OSS 120B（Gemini 備援）" };
+  try {
+    const text = await askGemini(apiKey, messages, maxTokens, temperature);
+    return { text, source: "Gemini 2.5" };
+  } catch (e) {
+    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
+    return { text, source: "GPT-OSS 120B（Gemini 備援）", debug: `Gemini 失敗：${String(e?.message || e || "")}` };
+  }
 }
 
 async function searchWeb(env, query) {
@@ -327,6 +328,7 @@ export async function onRequestPost(context) {
         chatMode:true,
         labels:{ a:aResult.source, b:"Qwen3 30B" },
         a, b,
+        debug:aResult.debug,
       });
     }
 
