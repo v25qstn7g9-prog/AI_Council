@@ -30,8 +30,8 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.7-auto-gemini-fallback";
-const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Cloudflare 額度失敗時的自動 Gemini 備援模型
+const VERSION = "3.8-gemini35-fast-fallback";
+const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -49,6 +49,27 @@ const DEFAULT_RATE_LIMIT = "8:1800";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
+// ============================================
+// 逾時設定（單位：毫秒）
+// ============================================
+// 主 Provider 卡住時，不要苦等，超過就直接切備援。
+// 這是「切換備援太久」的解法：以前失敗要等到平台自己放棄（可能數十秒），
+// 現在最多等 PRIMARY_TIMEOUT_MS 就換手。
+const PRIMARY_TIMEOUT_MS = 12000;   // 主 Provider 等 12 秒
+const FALLBACK_TIMEOUT_MS = 20000;  // 備援放寬到 20 秒，避免剛切過去又被砍掉
+
+/**
+ * 給任何 Promise 加上逾時。時間到就丟出錯誤，讓外層的 catch 立刻走備援流程。
+ */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} 逾時（超過 ${Math.round(ms / 1000)} 秒未回應）`)), ms)
+    ),
+  ]);
+}
+
 function out(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -65,8 +86,12 @@ function txt(r) {
   return "";
 }
 
-async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35) {
-  const r = await ai.run(model, { messages, max_tokens: maxTokens, temperature });
+async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
+  const r = await withTimeout(
+    ai.run(model, { messages, max_tokens: maxTokens, temperature }),
+    timeoutMs,
+    model
+  );
   const t = txt(r);
   if (!t) throw new Error(model + " 沒有回傳文字");
   return t;
@@ -89,16 +114,18 @@ async function getGeminiKey(env) {
 /**
  * 呼叫 Gemini API。把 OpenAI 風格的 messages（system/user）轉成 Gemini 格式。
  */
-async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35) {
+async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
   const wantsJson = maxTokens >= FINAL_MAX_TOKENS;
+  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingLevel 控制推理深度。
+  // 3.5 Flash-Lite 預設不做 thinking（回應最快）；需要深度推理的最終整合才開 high。
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
       maxOutputTokens: maxTokens,
-      temperature,
+      thinkingLevel: wantsJson ? "high" : "low",
       ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
@@ -109,6 +136,7 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35)
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!r.ok) {
@@ -139,11 +167,12 @@ function normalizeProvider(value, fallback = "cloudflare") {
   return ["cloudflare", "openai", "anthropic", "gemini"].includes(p) ? p : fallback;
 }
 
-async function askOpenAI(apiKey, model, messages, maxTokens = 1200, temperature = 0.35) {
+async function askOpenAI(apiKey, model, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!r.ok) throw new Error(`OpenAI HTTP ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const data = await r.json().catch(() => null);
@@ -152,7 +181,7 @@ async function askOpenAI(apiKey, model, messages, maxTokens = 1200, temperature 
   return text;
 }
 
-async function askAnthropic(apiKey, model, messages, maxTokens = 1200, temperature = 0.35) {
+async function askAnthropic(apiKey, model, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
   const systemMsg = messages.find(m => m.role === "system");
   const body = {
     model,
@@ -169,6 +198,7 @@ async function askAnthropic(apiKey, model, messages, maxTokens = 1200, temperatu
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!r.ok) throw new Error(`Anthropic HTTP ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const data = await r.json().catch(() => null);
@@ -209,13 +239,13 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       const key = await getSecret(env, "GEMINI_API_KEY");
       if (!key) throw e;
       try {
-        const text = await askGemini(key, messages, maxTokens, temperature);
+        const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
         return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
+    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
     return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
@@ -229,13 +259,13 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       const key = await getSecret(env, "GEMINI_API_KEY");
       if (!key) throw e;
       try {
-        const text = await askGemini(key, messages, maxTokens, temperature);
+        const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
         return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    const text = await ask(ai, MODEL_B, messages, maxTokens, temperature);
+    const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
     return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
