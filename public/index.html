@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.1 正式版</title>
+<title>AI 圓桌 v3.6 可插拔 AI</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -84,7 +84,7 @@ AI A 先修 → AI B Code Review → AI A 整合；Web Search 會區分已證實
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.1 · 正式版</span>
+<span id="status" class="badge">v3.6 · 可插拔 AI</span>
 <div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
@@ -253,13 +253,27 @@ function searchLabel(s){
   const m={no_api_key:"缺 TAVILY_API_KEY",auth_failed:"Tavily Key 驗證失敗",quota_or_rate_limit:"Tavily 額度/速率限制",network_error:"Tavily 連線失敗",no_results:"搜尋完成但無結果",disabled_by_user:"本題未搜尋"};
   return m[s.reason]||s.message||"未搜尋";
 }
+// 聊天模式下如果訊息帶有這些字眼，代表使用者其實想要查證/分析，
+// 自動退出聊天模式、切回完整工程審查流程。
+const CHAT_EXIT_KEYWORDS=["查","分析","查詢"];
+function shouldExitChatMode(text){
+  return CHAT_EXIT_KEYWORDS.some(k=>text.includes(k));
+}
+
 async function run(){
   const question=q.value.trim();
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
   addCard("me","你",question);
-  const isChat=chatModeEl.checked;
+
+  let isChat=chatModeEl.checked;
+  if(isChat&&shouldExitChatMode(question)){
+    isChat=false;
+    chatModeEl.checked=false;
+    chatModeEl.onchange();
+    addCard("card","💬 → 🛠️ 自動切換","偵測到「查／分析／查詢」，已退出閒聊模式，改用完整工程審查來處理這則。");
+  }
 
   if(isChat){
     status.textContent="聊天中…";
@@ -267,6 +281,7 @@ async function run(){
       const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
+      if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
       addCard("a",d.labels?.a||"AI A",d.a);
       addCard("b",d.labels?.b||"AI B",d.b);
       chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
