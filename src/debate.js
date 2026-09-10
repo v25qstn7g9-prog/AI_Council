@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.0-engineering-collab
+ * debate.js — ai-council-v3.3-chat-history
  *
  * POST /debate
  * body:
@@ -7,18 +7,25 @@
  *   question: string,
  *   webSearch?: boolean,
  *   files?: [{ path, content, size }],
- *   images?: [{ name, dataUrl }]
+ *   images?: [{ name, dataUrl }],
+ *   chatMode?: boolean,           // true = 輕量閒聊模式，跳過工程審查流程，回覆更快更短
+ *   history?: [{who,text}]        // 閒聊模式用：之前聊過的內容，讓 AI 記得上下文
  * }
  *
- * 工程協作流程：
+ * 工程協作流程（chatMode 為 false 或未帶時）：
  * 0. 可選 Web Search
  * 0.5 圖片交給 Vision 模型分析 UI / 錯誤畫面
  * 1. AI A = 主工程師：理解專案、提出修法與候選修改
  * 2. AI B = Code Reviewer：找錯、找漏、檢查風險
  * 3. AI A = 整合工程師：輸出最終結論 + 可下載的完整檔案替換內容
+ *
+ * 閒聊流程（chatMode 為 true 時）：
+ * 1. AI A 先回應（會參考 history）
+ * 2. AI B 自然接話（可補充、可有不同意見，也會參考 history）
+ * 不做總結收尾，不處理檔案、不要求 JSON、token 上限低很多，速度快上不少。
  */
 
-const VERSION = "3.1-stable";
+const VERSION = "3.3-chat-history";
 const MODEL_A = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -215,6 +222,44 @@ export async function onRequestPost(context) {
 
     const files = normalizeFiles(body?.files);
     const images = Array.isArray(body?.images) ? body.images.slice(0,MAX_IMAGES) : [];
+    const chatMode = body?.chatMode === true;
+
+    // ============================================
+    // 閒聊模式：不需要工程審查的重裝甲流程，
+    // 直接讓兩隻 AI 輕量對話，回覆更短、更快。
+    // 只有 A 回應、B 接話兩輪，不做總結收尾。
+    // 支援多輪對話：history 是之前聊過的內容，讓 AI 記得上下文。
+    // ============================================
+    if (chatMode) {
+      // history 格式：[{who:"you"|"a"|"b", text:"..."}]，只取最近幾輪避免 prompt 太長
+      const rawHistory = Array.isArray(body?.history) ? body.history.slice(-12) : [];
+      const historyText = rawHistory
+        .map(h => {
+          const label = h?.who === "you" ? "使用者" : h?.who === "a" ? "AI A" : h?.who === "b" ? "AI B" : "";
+          return label ? `${label}：${String(h.text || "").slice(0, 800)}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+      const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
+
+      const a = await ask(env.AI, MODEL_A, [
+        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
+        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
+      ], 500, 0.6);
+
+      const b = await ask(env.AI, MODEL_B, [
+        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
+        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
+      ], 500, 0.6);
+
+      return out({
+        ok:true,
+        version:VERSION,
+        chatMode:true,
+        labels:{ a:"GPT-OSS 120B", b:"Qwen3 30B" },
+        a, b,
+      });
+    }
 
     const webSearchRequested = body?.webSearch === true;
     const search = webSearchRequested
