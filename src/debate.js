@@ -196,7 +196,7 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
-  return { text: await askGemini(key, messages, maxTokens, temperature), source: "Gemini 2.5" };
+  return { text: await askGemini(key, messages, maxTokens, temperature), source: "Gemini 3.5 Flash-Lite" };
 }
 
 async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
