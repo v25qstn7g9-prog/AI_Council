@@ -37,6 +37,7 @@
   // Web Search（選用）
   // ============================================
   // 請用 Secret 設定：
+  //   wrangler secret put GEMINI_API_KEY
   //   wrangler secret put TAVILY_API_KEY
 
   // ============================================
@@ -46,6 +47,8 @@
   // COUNCIL_ENABLED：設 "false" 可臨時休會（例如 AI 額度快用完時）
   "vars": {
     "COUNCIL_RATE_LIMIT": "30:1800",
-    "COUNCIL_ENABLED": "true"
+    "COUNCIL_ENABLED": "true",
+    "COUNCIL_A_PROVIDER": "cloudflare",
+    "COUNCIL_B_PROVIDER": "cloudflare"
   }
 }

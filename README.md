@@ -1,4 +1,4 @@
-# AI 圓桌 v3.1｜正式版
+# AI 圓桌 v3.6｜可插拔 AI 正式版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -22,6 +22,36 @@
 第一次使用這個 Vision 模型前，Cloudflare 目前要求先接受 Meta License。請依 Cloudflare 官方說明完成一次 `prompt: "agree"`。
 
 圖片會先被 Vision 模型轉成「UI / 錯誤畫面分析」，再交給兩個工程 AI；不會要求文字模型自己假裝看圖。
+
+## AI A：Gemini 2.5 Flash-Lite
+
+v3.6 將 AI A / AI B 改成「可插拔 Provider」。預設仍是 Cloudflare，不需要新增 API Key；未來可透過環境變數切換成 OpenAI（ChatGPT API）、Anthropic（Claude API）或 Gemini。非 Cloudflare Provider 失敗時，仍會退回 Cloudflare。
+
+設定 Gemini Key（只有把 Provider 切到 Gemini 才需要）：
+
+```bash
+wrangler secret put GEMINI_API_KEY
+```
+
+### 未來切換 ChatGPT / Claude
+
+預設不用改，維持免費的 Cloudflare AI。若日後要使用 OpenAI / Claude API，可設定：
+
+```bash
+wrangler secret put OPENAI_API_KEY
+wrangler secret put ANTHROPIC_API_KEY
+```
+
+並在 `wrangler.jsonc` 的 `vars` 加入：
+
+```jsonc
+"COUNCIL_A_PROVIDER": "openai",
+"COUNCIL_B_PROVIDER": "anthropic"
+```
+
+可選模型：`OPENAI_MODEL`、`ANTHROPIC_MODEL`。沒有設定時使用程式內預設值。ChatGPT / Claude 的 App 訂閱與 API 計費是分開的；本版不會因為升級 v3.6 自動產生 API 費用。
+
+AI B Reviewer 仍使用 Cloudflare `@cf/qwen/qwen3-30b-a3b-fp8`。由於該模型 context window 為 32,768 tokens，v3.5 會只給 Reviewer 一個受控的專用上下文預算，避免大型專案把 Reviewer 的 context 撐爆。
 
 ## Web Search
 
@@ -58,7 +88,7 @@ wrangler secret put TAVILY_API_KEY
 
 ## 正式版 Web Search 驗證規則
 
-v3.1 將網路搜尋結果分成三層，避免「查得到」卻把推測講成事實：
+v3.5 將網路搜尋結果分成三層，避免「查得到」卻把推測講成事實：
 
 - **已證實**：有附件或 Web Search 來源直接支持。
 - **推測**：由已知事實推導出的合理解讀。
@@ -84,7 +114,8 @@ wrangler deploy
 
 ## 版本
 
-- v3.1：正式版；Web Search 已證實／推測／待驗證分流 + Reviewer 來源核實
+- v3.5：Gemini 主工程師 + Reviewer context budget + 最終完整檔案輸出上限提升 + 不可信附件/搜尋內容隔離 + 文件版本同步
+- v3.1：Web Search 已證實／推測／待驗證分流 + Reviewer 來源核實
 - v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP
 - v2.2：Tavily Web Search
 - v2.1：Workers with Static Assets 基礎架構
