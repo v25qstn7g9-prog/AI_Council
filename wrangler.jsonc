@@ -30,8 +30,7 @@
   // 沒綁也不會壞：debate.js 找不到 council_kv 時會自動退化成「不限制」，
   // 但那樣公開網址就沒有防亂打的保護，建議還是綁上。
   "kv_namespaces": [
-    { "binding": "council_kv", "id": "{ "binding": "council_kv", "id": "651bbecd5c8e4303a221a6ab96ea0a06" }
-" }
+    { "binding": "council_kv", "id": "651bbecd5c8e4303a221a6ab96ea0a06" }
   ],
 
   // ============================================
