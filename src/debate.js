@@ -23,10 +23,15 @@
  * 1. AI A 先回應（會參考 history）
  * 2. AI B 自然接話（可補充、可有不同意見，也會參考 history）
  * 不做總結收尾，不處理檔案、不要求 JSON、token 上限低很多，速度快上不少。
+ *
+ * v3.4 更新：AI A（主 AI）改用 Gemini 2.5（走 Google API，不吃 Cloudflare AI 額度），
+ * AI B 繼續留在 Cloudflare。若沒設定 GEMINI_API_KEY 或呼叫失敗，
+ * 自動退回 Cloudflare 的 MODEL_A_FALLBACK，不會讓功能壞掉。
  */
 
-const VERSION = "3.3-chat-history";
-const MODEL_A = "@cf/openai/gpt-oss-120b";
+const VERSION = "3.4-gemini-main";
+const GEMINI_MODEL = "gemini-2.5-flash-lite"; // 想換更強的模型可改這行，例如 "gemini-2.5-flash"
+const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
@@ -58,6 +63,69 @@ async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35) {
   const t = txt(r);
   if (!t) throw new Error(model + " 沒有回傳文字");
   return t;
+}
+
+/**
+ * 讀取 GEMINI_API_KEY，相容一般環境變數跟 Secrets Store 兩種綁定方式
+ * （Secrets Store 綁定的變數要用 .get() 非同步取值）。
+ */
+async function getGeminiKey(env) {
+  let apiKey = env.GEMINI_API_KEY;
+  try {
+    if (apiKey && typeof apiKey.get === "function") apiKey = await apiKey.get();
+  } catch {
+    return "";
+  }
+  return String(apiKey || "").trim();
+}
+
+/**
+ * 呼叫 Gemini API。把 OpenAI 風格的 messages（system/user）轉成 Gemini 格式。
+ */
+async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35) {
+  const systemMsg = messages.find(m => m.role === "system");
+  const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
+
+  const body = {
+    contents: [{ role: "user", parts: userParts }],
+    generationConfig: { maxOutputTokens: maxTokens, temperature },
+  };
+  if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`Gemini HTTP ${r.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await r.json().catch(() => null);
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("").trim();
+  if (!text) throw new Error("Gemini 沒有回傳文字");
+  return text;
+}
+
+/**
+ * AI A（主 AI）的統一入口：優先用 Gemini，沒設定 key 或呼叫失敗就自動退回
+ * Cloudflare 的 MODEL_A_FALLBACK，確保功能不會因為 Gemini 出狀況而整個掛掉。
+ */
+async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
+  const apiKey = await getGeminiKey(env);
+  if (apiKey) {
+    try {
+      const text = await askGemini(apiKey, messages, maxTokens, temperature);
+      return { text, source: "Gemini 2.5" };
+    } catch (e) {
+      // Gemini 失敗就默默退回 Cloudflare，不中斷使用者的請求
+    }
+  }
+  const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
+  return { text, source: "GPT-OSS 120B（Gemini 備援）" };
 }
 
 async function searchWeb(env, query) {
@@ -242,10 +310,11 @@ export async function onRequestPost(context) {
         .join("\n");
       const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
 
-      const a = await ask(env.AI, MODEL_A, [
+      const aResult = await askA(env.AI, env, [
         { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
         { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
       ], 500, 0.6);
+      const a = aResult.text;
 
       const b = await ask(env.AI, MODEL_B, [
         { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
@@ -256,7 +325,7 @@ export async function onRequestPost(context) {
         ok:true,
         version:VERSION,
         chatMode:true,
-        labels:{ a:"GPT-OSS 120B", b:"Qwen3 30B" },
+        labels:{ a:aResult.source, b:"Qwen3 30B" },
         a, b,
       });
     }
@@ -298,10 +367,11 @@ ${searchNote}
 10. 若來源彼此衝突，要明確指出衝突，不可自行選一個當真。
 11. 引用 Web Search 資料時，盡量保留來源名稱或 URL，讓使用者能核對。`;
 
-    const a = await ask(env.AI, MODEL_A, [
+    const aResult = await askA(env.AI, env, [
       { role:"system", content:"你是資深全端工程師，擅長 HTML/JS/Cloudflare/Vercel、除錯、版本整合。用繁體中文，精準務實。" },
       { role:"user", content:engineerPrompt },
     ], 1700, 0.25);
+    const a = aResult.text;
 
     const reviewPrompt = `【原始任務】
 ${q}
@@ -374,10 +444,11 @@ ${b}
 - 「建議下一步查詢」不能被寫成已發生事實。
 - 最終摘要要優先呈現已證實因素；推測與待驗證放後面。`;
 
-    const finalRaw = await ask(env.AI, MODEL_A, [
+    const finalResult = await askA(env.AI, env, [
       { role:"system", content:"你是軟體專案最終整合工程師。嚴格輸出有效 JSON。" },
       { role:"user", content:finalPrompt },
     ], 3000, 0.15);
+    const finalRaw = finalResult.text;
 
     const artifact = extractJson(finalRaw);
     const finalText = artifact
@@ -387,7 +458,7 @@ ${b}
     return out({
       ok:true,
       version:VERSION,
-      labels:{ a:"GPT-OSS 120B · 主工程師", b:"Qwen3 30B · Reviewer" },
+      labels:{ a:`${aResult.source} · 主工程師`, b:"Qwen3 30B · Reviewer" },
       a, b,
       final:finalText,
       artifact,
