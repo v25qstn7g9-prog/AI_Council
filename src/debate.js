@@ -30,8 +30,8 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.6-pluggable-ai";
-const GEMINI_MODEL = "gemini-2.5-flash-lite"; // 想換更強的模型可改這行，例如 "gemini-2.5-flash"
+const VERSION = "3.7-auto-gemini-fallback";
+const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Cloudflare 額度失敗時的自動 Gemini 備援模型
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -205,7 +205,16 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
     const result = await askProvider(ai, env, provider, messages, maxTokens, temperature, "A");
     return result;
   } catch (e) {
-    if (provider === "cloudflare") throw e;
+    if (provider === "cloudflare") {
+      const key = await getSecret(env, "GEMINI_API_KEY");
+      if (!key) throw e;
+      try {
+        const text = await askGemini(key, messages, maxTokens, temperature);
+        return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+      } catch (ge) {
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
+      }
+    }
     const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature);
     return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
@@ -216,7 +225,16 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
   try {
     return await askProvider(ai, env, provider, messages, maxTokens, temperature, "B");
   } catch (e) {
-    if (provider === "cloudflare") throw e;
+    if (provider === "cloudflare") {
+      const key = await getSecret(env, "GEMINI_API_KEY");
+      if (!key) throw e;
+      try {
+        const text = await askGemini(key, messages, maxTokens, temperature);
+        return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+      } catch (ge) {
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
+      }
+    }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature);
     return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
