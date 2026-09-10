@@ -1,1 +1,35 @@
+# 環境變數 & 機密檔案
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Cloudflare Wrangler
+.wrangler/
+wrangler.lock
+
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# IDE & 編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+__MACOSX/
+._*
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Build & 分發
+dist/
+build/
+*.zip
 
