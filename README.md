@@ -65,6 +65,34 @@ wrangler deploy
 
 ## 版本
 
+- v3.0.1：Tavily Secret runtime 診斷
 - v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP
 - v2.2：Tavily Web Search
 - v2.1：Workers with Static Assets 基礎架構
+
+## v3.0.1 Tavily Secret 診斷
+
+本版新增一個安全診斷欄位：
+
+```text
+hasTavilyKey: true / false
+```
+
+它只判斷 Worker runtime 是否讀得到 `TAVILY_API_KEY`，**不會回傳 Secret 值本身**。
+
+判讀方式：
+
+- `true`：Worker 已讀到 Secret。若 Web Search 仍失敗，就往 Tavily Key 驗證、額度或網路呼叫查。
+- `false`：Worker runtime 沒讀到 Secret。優先檢查 Cloudflare production environment / deployment / Secret 綁定。
+
+前端 Web Search 區塊也會直接顯示：
+
+```text
+✅ Worker 讀得到 TAVILY_API_KEY
+```
+
+或：
+
+```text
+❌ Worker 讀不到 TAVILY_API_KEY
+```
