@@ -56,7 +56,7 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 // 這是「切換備援太久」的解法：以前失敗要等到平台自己放棄（可能數十秒），
 // 現在最多等 PRIMARY_TIMEOUT_MS 就換手。
 const PRIMARY_TIMEOUT_MS = 12000;   // 主 Provider 等 12 秒
-const FALLBACK_TIMEOUT_MS = 20000;  // 備援放寬到 20 秒，避免剛切過去又被砍掉
+const FALLBACK_TIMEOUT_MS = 60000;  // Gemini 備援放寬到 60 秒，工程會議需要較長思考時間
 
 /**
  * 給任何 Promise 加上逾時。時間到就丟出錯誤，讓外層的 catch 立刻走備援流程。
