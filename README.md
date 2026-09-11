@@ -1,4 +1,4 @@
-# AI 圓桌 v3.7｜Cloudflare 自動切 Gemini 3.5 備援版
+# AI 圓桌 v3.8.1｜Cloudflare 自動切 Gemini 3.5 備援版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -49,7 +49,7 @@ wrangler secret put ANTHROPIC_API_KEY
 "COUNCIL_B_PROVIDER": "anthropic"
 ```
 
-可選模型：`OPENAI_MODEL`、`ANTHROPIC_MODEL`。沒有設定時使用程式內預設值。ChatGPT / Claude 的 App 訂閱與 API 計費是分開的；本版不會因為升級 v3.6 自動產生 API 費用。
+可選模型：`OPENAI_MODEL`、`ANTHROPIC_MODEL`。沒有設定時使用程式內預設值。ChatGPT / Claude 的 App 訂閱與 API 計費是分開的；本版不會因為升級自動產生 API 費用。
 
 AI B Reviewer 仍使用 Cloudflare `@cf/qwen/qwen3-30b-a3b-fp8`。由於該模型 context window 為 32,768 tokens，v3.5 會只給 Reviewer 一個受控的專用上下文預算，避免大型專案把 Reviewer 的 context 撐爆。
 
@@ -114,6 +114,7 @@ wrangler deploy
 
 ## 版本
 
+- v3.8.1：前後端版本號全面對齊，強化 Gemini 3.5 備援與 JSON 容錯
 - v3.7：Cloudflare 失敗時自動切換 Gemini 3.5 Flash-Lite，A / B 皆支援；保留原本可插拔 Provider 與反向備援
 - v3.6：可插拔 AI Provider 正式版
 - v3.5：Gemini 主工程師 + Reviewer context budget + 最終完整檔案輸出上限提升 + 不可信附件/搜尋內容隔離 + 文件版本同步
@@ -131,4 +132,3 @@ wrangler deploy
 - Variable：`CLOUDFLARE_ACCOUNT_ID`（Cloudflare Account ID）
 
 開啟 `https://你的-worker.workers.dev/usage` 可看到 JSON：今日額度、已使用 Neurons、剩餘 Neurons、使用率與下一次重置時間。
-
