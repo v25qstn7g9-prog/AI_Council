@@ -491,15 +491,15 @@ export async function onRequestPost(context) {
         : "";
 
       const aResult = await askA(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
+        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式。回覆要精簡濃縮，只講重點，控制在原本長度的一半左右，不要長篇大論。" },
         { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}${chatSearchNote}` },
-      ], 500, 0.6);
+      ], 260, 0.6);
       const a = aResult.text;
 
       const bResult = await askB(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
+        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。回覆要精簡濃縮，只講重點，控制在原本長度的一半左右，不要長篇大論。" },
         { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}${chatSearchNote}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
-      ], 500, 0.6);
+      ], 260, 0.6);
       const b = bResult.text;
 
       return out({
