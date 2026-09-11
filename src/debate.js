@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.6-pluggable-ai
+ * debate.js — ai-council-v3.8.2-gemini-config-fix
  *
  * POST /debate
  * body:
@@ -8,31 +8,13 @@
  *   webSearch?: boolean,
  *   files?: [{ path, content, size }],
  *   images?: [{ name, dataUrl }],
- *   chatMode?: boolean,           // true = 輕量閒聊模式，跳過工程審查流程，回覆更快更短
- *   history?: [{who,text}]        // 閒聊模式用：之前聊過的內容，讓 AI 記得上下文
+ *   chatMode?: boolean,
+ *   history?: [{who,text}]
  * }
- *
- * 工程協作流程（chatMode 為 false 或未帶時）：
- * 0. 可選 Web Search
- * 0.5 圖片交給 Vision 模型分析 UI / 錯誤畫面
- * 1. AI A = 主工程師：理解專案、提出修法與候選修改
- * 2. AI B = Code Reviewer：找錯、找漏、檢查風險
- * 3. AI A = 整合工程師：輸出最終結論 + 可下載的完整檔案替換內容
- *
- * 閒聊流程（chatMode 為 true 時）：
- * 1. AI A 先回應（會參考 history）
- * 2. AI B 自然接話（可補充、可有不同意見，也會參考 history）
- * 不做總結收尾，不處理檔案、不要求 JSON、token 上限低很多，速度快上不少。
- *
- * v3.6 可插拔 Provider：AI A / AI B 可各自透過環境變數
- * COUNCIL_A_PROVIDER / COUNCIL_B_PROVIDER 切換成 cloudflare / gemini /
- * openai / anthropic，預設維持免費的 Cloudflare。非 Cloudflare Provider
- * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8.1-gemini35-fast-fallback";
-const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
-const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
+const VERSION = "3.8.2-gemini-config-fix";
+const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
@@ -41,7 +23,6 @@ const MAX_FILES = 30;
 const MAX_FILE_CHARS = 30000;
 const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
-// Reviewer B 使用較小的專用上下文，避免 Qwen3 30B 的 32K context 被大型專案塞爆。
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
 const MAX_REVIEW_FILE_CHARS = 22000;
 const FINAL_MAX_TOKENS = 16000;
@@ -49,18 +30,9 @@ const DEFAULT_RATE_LIMIT = "8:1800";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
-// ============================================
-// 逾時設定（單位：毫秒）
-// ============================================
-// 主 Provider 卡住時，不要苦等，超過就直接切備援。
-// 這是「切換備援太久」的解法：以前失敗要等到平台自己放棄（可能數十秒），
-// 現在最多等 PRIMARY_TIMEOUT_MS 就換手。
-const PRIMARY_TIMEOUT_MS = 12000;   // 主 Provider 等 12 秒
-const FALLBACK_TIMEOUT_MS = 60000;  // Gemini 備援放寬到 60 秒，工程會議需要較長思考時間
+const PRIMARY_TIMEOUT_MS = 12000;
+const FALLBACK_TIMEOUT_MS = 60000;
 
-/**
- * 給任何 Promise 加上逾時。時間到就丟出錯誤，讓外層的 catch 立刻走備援流程。
- */
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
@@ -97,30 +69,12 @@ async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35, ti
   return t;
 }
 
-/**
- * 讀取 GEMINI_API_KEY，相容一般環境變數跟 Secrets Store 兩種綁定方式
- * （Secrets Store 綁定的變數要用 .get() 非同步取值）。
- */
-async function getGeminiKey(env) {
-  let apiKey = env.GEMINI_API_KEY;
-  try {
-    if (apiKey && typeof apiKey.get === "function") apiKey = await apiKey.get();
-  } catch {
-    return "";
-  }
-  return String(apiKey || "").trim();
-}
-
-/**
- * 呼叫 Gemini API。把 OpenAI 風格的 messages（system/user）轉成 Gemini 格式。
- */
-async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
+async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
+  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
   const wantsJson = maxTokens >= FINAL_MAX_TOKENS;
-  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingLevel 控制推理深度。
-  // 3.5 Flash-Lite 預設不做 thinking（回應最快）；需要深度推理的最終整合才開 high。
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
@@ -133,7 +87,7 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35,
   };
   if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
   const r = await fetch(url, {
     method: "POST",
     headers: {
@@ -155,10 +109,6 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35,
   return text;
 }
 
-/**
- * AI A（主 AI）的統一入口：優先用 Gemini，沒設定 key 或呼叫失敗就自動退回
- * Cloudflare 的 MODEL_A_FALLBACK，確保功能不會因為 Gemini 出狀況而整個掛掉。
- */
 async function getSecret(env, name) {
   let value = env?.[name];
   try {
@@ -231,7 +181,8 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
-  return { text: await askGemini(key, messages, maxTokens, temperature), source: "Gemini 3.5 Flash-Lite" };
+  const geminiName = String(env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
+  return { text: await askGemini(env, key, messages, maxTokens, temperature), source: `Gemini ${geminiName}` };
 }
 
 async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
@@ -244,10 +195,10 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       const key = await getSecret(env, "GEMINI_API_KEY");
       if (!key) throw e;
       try {
-        const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-        return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+        const text = await askGemini(env, key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 3.5 備援失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援失敗：${String(ge?.message || ge || "")}`);
       }
     }
     const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
@@ -264,10 +215,10 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       const key = await getSecret(env, "GEMINI_API_KEY");
       if (!key) throw e;
       try {
-        const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-        return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+        const text = await askGemini(env, key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 3.5 備援失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援失敗：${String(ge?.message || ge || "")}`);
       }
     }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
@@ -413,7 +364,13 @@ function extractJson(text) {
     try {
       const x = JSON.parse(candidate);
       if (x && typeof x === "object") return x;
-    } catch {}
+    } catch {
+      try {
+        const cleaned = candidate.replace(/[\u0000-\u001F]+/g, "").replace(/,\s*([}\\]])/g, "$1");
+        const x = JSON.parse(cleaned);
+        if (x && typeof x === "object") return x;
+      } catch {}
+    }
   }
   return null;
 }
@@ -455,14 +412,7 @@ export async function onRequestPost(context) {
     const images = Array.isArray(body?.images) ? body.images.slice(0,MAX_IMAGES) : [];
     const chatMode = body?.chatMode === true;
 
-    // ============================================
-    // 閒聊模式：不需要工程審查的重裝甲流程，
-    // 直接讓兩隻 AI 輕量對話，回覆更短、更快。
-    // 只有 A 回應、B 接話兩輪，不做總結收尾。
-    // 支援多輪對話：history 是之前聊過的內容，讓 AI 記得上下文。
-    // ============================================
     if (chatMode) {
-      // history 格式：[{who:"you"|"a"|"b", text:"..."}]，只取最近幾輪避免 prompt 太長
       const rawHistory = Array.isArray(body?.history) ? body.history.slice(-12) : [];
       const historyText = rawHistory
         .map(h => {
