@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8-gemini35-fast-fallback";
+const VERSION = "3.8.1-gemini35-fast-fallback";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -125,16 +125,21 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35,
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
       maxOutputTokens: maxTokens,
-      thinkingLevel: wantsJson ? "high" : "low",
+      thinkingConfig: {
+        thinkingLevel: wantsJson ? "high" : "low",
+      },
       ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
   if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
   const r = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -242,7 +247,7 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
         return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 3.5 備援失敗：${String(ge?.message || ge || "")}`);
       }
     }
     const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
@@ -262,7 +267,7 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         const text = await askGemini(key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
         return { text, source: "Gemini 3.5 Flash-Lite（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 3.5 備援失敗：${String(ge?.message || ge || "")}`);
       }
     }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
@@ -650,8 +655,10 @@ ${b}
   } catch (e) {
     const s = String(e?.message || e || "");
     return out({
-      error:/neuron|quota|limit|exceeded|usage/i.test(s)
-        ? "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂"
+      error:/Cloudflare AI.*(3036|429)|daily free allocation|used up your daily free allocation/i.test(s)
+        ? (s.includes("Gemini 3.5 備援失敗")
+            ? `Cloudflare AI 可能達到限制，而且 Gemini 備援也失敗：${s}`
+            : "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂")
         : s || "AI 工程圓桌執行失敗"
     }, 500);
   }
