@@ -329,6 +329,44 @@ async function run(){
 send.onclick=run;
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 $("#clear").onclick=()=>{chat.innerHTML="";chatHistory=[]};
+
+// 輸入框拿到焦點（鍵盤要彈起來了）時，把背景頁面「鎖死」，不能被 iOS
+// 內部的 scroll-into-view 行為拖走；只用 overflow:hidden 不夠——那只能
+// 擋使用者手動滑動，擋不住 iOS 為了讓聚焦的輸入框可見而做的內部捲動
+// （比 CSS overflow 屬性更底層）。用 position:fixed 把 body 整個「拔出」
+// 文件流，記錄原本捲動位置；輸入框失去焦點（鍵盤收起）時自動捲回去，
+// 不用手動滑回原位。跟存股 App 用的是同一套做法，這裡因為沒有「開啟/
+// 關閉」的彈窗狀態，改成用 focus/blur 觸發。
+let bgScrollY=0, bgLocked=false;
+function lockBackground(){
+  if(bgLocked)return;
+  bgLocked=true;
+  bgScrollY=window.scrollY;
+  document.documentElement.style.overflow="hidden";
+  document.documentElement.style.height="100%";
+  document.body.style.position="fixed";
+  document.body.style.top=`-${bgScrollY}px`;
+  document.body.style.left="0";
+  document.body.style.right="0";
+  document.body.style.width="100%";
+  document.body.style.overflow="hidden";
+}
+function unlockBackground(){
+  if(!bgLocked)return;
+  bgLocked=false;
+  document.documentElement.style.overflow="";
+  document.documentElement.style.height="";
+  document.body.style.position="";
+  document.body.style.top="";
+  document.body.style.left="";
+  document.body.style.right="";
+  document.body.style.width="";
+  document.body.style.overflow="";
+  window.scrollTo(0,bgScrollY);
+}
+q.addEventListener("focus",lockBackground);
+q.addEventListener("blur",unlockBackground);
+
 renderFiles();
 </script>
 </body>
