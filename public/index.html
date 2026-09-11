@@ -278,10 +278,11 @@ async function run(){
   if(isChat){
     status.textContent="聊天中…";
     try{
-      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
+      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory,webSearch:webSearch.checked})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
+      if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
       addCard("a",d.labels?.a||"AI A",d.a);
       addCard("b",d.labels?.b||"AI B",d.b);
       chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
