@@ -121,3 +121,14 @@ wrangler deploy
 - v3.0：工程協作、檔案 / ZIP / 圖片、Code Review、修正版 ZIP
 - v2.2：Tavily Web Search
 - v2.1：Workers with Static Assets 基礎架構
+
+## Workers AI 用量儀表 API
+
+此版本新增 `GET /usage`，直接透過 Cloudflare GraphQL Analytics 查詢當天（UTC 00:00 起）的 Workers AI Neurons 使用量。
+
+請在 Worker 設定：
+- Secret：`CLOUDFLARE_ANALYTICS_TOKEN`（Account Analytics → Read）
+- Variable：`CLOUDFLARE_ACCOUNT_ID`（Cloudflare Account ID）
+
+開啟 `https://你的-worker.workers.dev/usage` 可看到 JSON：今日額度、已使用 Neurons、剩餘 Neurons、使用率與下一次重置時間。
+
