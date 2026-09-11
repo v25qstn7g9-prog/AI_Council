@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8.2-real-error-visible";
+const VERSION = "3.8.3-thinkingconfig-fixed";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -119,13 +119,15 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35,
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
   const wantsJson = maxTokens >= FINAL_MAX_TOKENS;
-  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingLevel 控制推理深度。
-  // 3.5 Flash-Lite 預設不做 thinking（回應最快）；需要深度推理的最終整合才開 high。
+  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingConfig.thinkingLevel
+  // 控制推理深度。注意 thinkingLevel 必須包在 thinkingConfig 物件裡，
+  // 直接放在 generationConfig 下會被 API 拒絕（Unknown name "thinkingLevel"）。
+  // 一般對話用 minimal 追求低延遲；最終整合需要嚴謹推理才開 high。
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
       maxOutputTokens: maxTokens,
-      thinkingLevel: wantsJson ? "high" : "low",
+      thinkingConfig: { thinkingLevel: wantsJson ? "high" : "minimal" },
       ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
