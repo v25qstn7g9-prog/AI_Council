@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.9-chatmode-websearch";
+const VERSION = "3.8-gemini35-fast-fallback";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -55,8 +55,8 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 // 主 Provider 卡住時，不要苦等，超過就直接切備援。
 // 這是「切換備援太久」的解法：以前失敗要等到平台自己放棄（可能數十秒），
 // 現在最多等 PRIMARY_TIMEOUT_MS 就換手。
-const PRIMARY_TIMEOUT_MS = 6000;    // 主 Provider 等 6 秒，超時立即切 Gemini
-const FALLBACK_TIMEOUT_MS = 12000;  // Gemini 備援最多等 12 秒
+const PRIMARY_TIMEOUT_MS = 12000;   // 主 Provider 等 12 秒
+const FALLBACK_TIMEOUT_MS = 20000;  // 備援放寬到 20 秒，避免剛切過去又被砍掉
 
 /**
  * 給任何 Promise 加上逾時。時間到就丟出錯誤，讓外層的 catch 立刻走備援流程。
@@ -119,15 +119,13 @@ async function askGemini(apiKey, messages, maxTokens = 1200, temperature = 0.35,
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
   const wantsJson = maxTokens >= FINAL_MAX_TOKENS;
-  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingConfig.thinkingLevel
-  // 控制推理深度。注意 thinkingLevel 必須包在 thinkingConfig 物件裡，
-  // 直接放在 generationConfig 下會被 API 拒絕（Unknown name "thinkingLevel"）。
-  // 一般對話用 minimal 追求低延遲；最終整合需要嚴謹推理才開 high。
+  // Gemini 3.x 已棄用 temperature / top_p / top_k，改用 thinkingLevel 控制推理深度。
+  // 3.5 Flash-Lite 預設不做 thinking（回應最快）；需要深度推理的最終整合才開 high。
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
       maxOutputTokens: maxTokens,
-      thinkingConfig: { thinkingLevel: wantsJson ? "high" : "minimal" },
+      thinkingLevel: wantsJson ? "high" : "low",
       ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
@@ -247,14 +245,8 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    try {
-      const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-      return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
-    } catch (ce) {
-      // 兩條路都失敗時，把「主 Provider 的失敗原因」一起帶出來，
-      // 否則只會看到 Cloudflare 的訊息，永遠查不到主 Provider 為何失敗。
-      throw new Error(`${provider} 失敗：${String(e?.message || e || "")}｜Cloudflare 備援也失敗：${String(ce?.message || ce || "")}`);
-    }
+    const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+    return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
 
@@ -273,12 +265,8 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
         throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援也失敗：${String(ge?.message || ge || "")}`);
       }
     }
-    try {
-      const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-      return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
-    } catch (ce) {
-      throw new Error(`${provider} 失敗：${String(e?.message || e || "")}｜Cloudflare 備援也失敗：${String(ce?.message || ce || "")}`);
-    }
+    const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+    return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
 
@@ -480,26 +468,16 @@ export async function onRequestPost(context) {
         .join("\n");
       const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
 
-      // 閒聊模式一樣可以開 Web Search；搜尋結果一併塞進訊息內容，
-      // 不管 askA/askB 內部實際用 Cloudflare 還是 Gemini 備援都收得到。
-      const chatWebSearchRequested = body?.webSearch === true;
-      const chatSearch = chatWebSearchRequested
-        ? await searchWeb(env, q)
-        : { ok:true, used:false, reason:"disabled_by_user", message:"Web Search 已關閉", text:"", resultCount:0 };
-      const chatSearchNote = chatSearch.used && chatSearch.text
-        ? `\n\n【Web Search 資料，若跟話題相關可參考，並註明是查到的資訊】\n${chatSearch.text}`
-        : "";
-
       const aResult = await askA(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式。回覆要精簡濃縮，只講重點，控制在原本長度的一半左右，不要長篇大論。" },
-        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}${chatSearchNote}` },
-      ], 260, 0.6);
+        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
+        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
+      ], 500, 0.6);
       const a = aResult.text;
 
       const bResult = await askB(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。回覆要精簡濃縮，只講重點，控制在原本長度的一半左右，不要長篇大論。" },
-        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}${chatSearchNote}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
-      ], 260, 0.6);
+        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
+        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
+      ], 500, 0.6);
       const b = bResult.text;
 
       return out({
@@ -509,12 +487,6 @@ export async function onRequestPost(context) {
         chatMode:true,
         labels:{ a:aResult.source, b:bResult.source },
         a, b,
-        webSearchRequested: chatWebSearchRequested,
-        search:{
-          ok:Boolean(chatSearch.ok), used:Boolean(chatSearch.used),
-          reason:chatSearch.reason, message:chatSearch.message,
-          resultCount:Number(chatSearch.resultCount||0),
-        },
         debug:[aResult.debug, bResult.debug].filter(Boolean).join("\n") || undefined,
       });
     }
@@ -677,13 +649,8 @@ ${b}
     });
   } catch (e) {
     const s = String(e?.message || e || "");
-    // 只有「純粹是 Cloudflare 額度問題」才顯示那句俏皮話；
-    // 只要訊息裡含有其他 Provider 的失敗原因，就原樣顯示，
-    // 免得真正的根因（例如 Gemini 的 HTTP 400）被蓋掉查不到。
-    const onlyCloudflareQuota =
-      /neuron|quota|limit|exceeded|usage/i.test(s) && !/｜|gemini|openai|anthropic/i.test(s);
     return out({
-      error: onlyCloudflareQuota
+      error:/neuron|quota|limit|exceeded|usage/i.test(s)
         ? "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂"
         : s || "AI 工程圓桌執行失敗"
     }, 500);
