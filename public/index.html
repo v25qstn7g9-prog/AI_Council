@@ -19,7 +19,7 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font
 .small{font-size:11px;color:var(--sub);line-height:1.5}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .toggleWrap{display:flex;gap:7px;align-items:center;font-size:12px;color:#d8deea}.toggle{position:relative;width:42px;height:24px}.toggle input{display:none}.slider{position:absolute;inset:0;border-radius:999px;background:#353b48}.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.18s}.toggle input:checked+.slider{background:#2b8a57}.toggle input:checked+.slider:before{transform:translateX(18px)}
 .badge{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--sub)}.badge.ok{color:var(--ok);border-color:#2d6a46}.badge.warn{color:var(--warn);border-color:#725b2d}
-footer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,#0b0d12 14%);padding:22px 12px calc(max(12px,env(safe-area-inset-bottom)) + env(keyboard-inset-height, 0px))}
+footer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,#0b0d12 14%);padding:22px 12px max(12px,env(safe-area-inset-bottom))}
 .composer{max-width:860px;margin:auto;background:#121720;border:1px solid var(--line);border-radius:16px;padding:10px}
 textarea{width:100%;height:78px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:7px}
 button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color:#17130a;font-weight:800;cursor:pointer}button.secondary{background:#262c38;color:#d9dfeb}button:disabled{opacity:.45}
@@ -329,16 +329,6 @@ async function run(){
 send.onclick=run;
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 $("#clear").onclick=()=>{chat.innerHTML="";chatHistory=[]};
-
-// AI 圓桌整頁本身是可以自由捲動的長頁面（附件、開關、對話紀錄都在
-// 同一頁），跟存股 App 那種「彈出視窗」不一樣，不能把整頁鎖死──那樣
-// 連對話該有的自動捲動（AI 回覆時捲到最新訊息）都會一起被擋住。
-// 這裡改成輕量做法：只在輸入框拿到焦點時記住當下的捲動位置，完全不
-// 阻擋任何捲動；等輸入框失去焦點（收鍵盤）時，才把頁面撐回記住的位置。
-let bgScrollY=0;
-q.addEventListener("focus",()=>{bgScrollY=window.scrollY;});
-q.addEventListener("blur",()=>{window.scrollTo(0,bgScrollY);});
-
 renderFiles();
 </script>
 </body>
