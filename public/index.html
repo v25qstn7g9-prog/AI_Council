@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.8.1 · 工程協作</title>
+<title>AI 圓桌 v3.8.2 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -98,7 +98,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.8.1 · 可插拔 AI</span>
+<span id="status" class="badge">v3.8.2 · 可插拔 AI</span>
 <div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
@@ -141,6 +141,9 @@ function renderFiles(){
   stats.textContent=workspace.size?`${workspace.size} 個項目 · ${texts} 文字檔 · ${imgs} 圖片 · 原始 ${human(bytes)}`:"尚未加入附件";
 }
 async function readTextFile(file,path){
+  if(file.size > 2 * 1024 * 1024){
+    console.warn(`檔案 ${path} 超過 2MB，建議精簡以避免 Payload 過大`);
+  }
   let content=await file.text();
   workspace.set(path,{path,kind:"text",file,content});
 }
@@ -285,10 +288,14 @@ async function run(){
     addCard("card","💬 → 🛠️ 自動切換","偵測到「查／分析／查詢」，已退出閒聊模式，改用完整工程審查來處理這則。");
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
+
   if(isChat){
     status.textContent="聊天中…";
     try{
-      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
+      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory}),signal:controller.signal});
+      clearTimeout(timeoutId);
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
@@ -298,7 +305,13 @@ async function run(){
       if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
       status.textContent=`完成 · ${d.version}`;
     }catch(e){
-      addCard("err","聊天失敗",e.message);status.textContent="失敗";
+      clearTimeout(timeoutId);
+      if(e.name==="AbortError"){
+        addCard("err","聊天逾時","請求超過 90 秒未回應，請稍後再試。");
+      }else{
+        addCard("err","聊天失敗",e.message);
+      }
+      status.textContent="失敗";
     }finally{send.disabled=false;q.focus()}
     return;
   }
@@ -308,7 +321,8 @@ async function run(){
     const files=buildPayloadFiles();
     const images=await buildPayloadImages();
     status.textContent=`工程會議中 · ${files.length} 檔 + ${images.length} 圖…`;
-    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images})});
+    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images}),signal:controller.signal});
+    clearTimeout(timeoutId);
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
 
@@ -323,7 +337,13 @@ async function run(){
     else addCard("judge","最終整合",d.final||"已完成");
     status.textContent=`完成 · ${d.version}`;
   }catch(e){
-    addCard("err","工程會議失敗",e.message);status.textContent="失敗";
+    clearTimeout(timeoutId);
+    if(e.name==="AbortError"){
+      addCard("err","工程會議逾時","請求超過 90 秒未回應，請稍後再試。");
+    }else{
+      addCard("err","工程會議失敗",e.message);
+    }
+    status.textContent="失敗";
   }finally{send.disabled=false;q.focus()}
 }
 send.onclick=run;
