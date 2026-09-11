@@ -20,9 +20,6 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font
 .toggleWrap{display:flex;gap:7px;align-items:center;font-size:12px;color:#d8deea}.toggle{position:relative;width:42px;height:24px}.toggle input{display:none}.slider{position:absolute;inset:0;border-radius:999px;background:#353b48}.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.18s}.toggle input:checked+.slider{background:#2b8a57}.toggle input:checked+.slider:before{transform:translateX(18px)}
 .badge{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--sub)}.badge.ok{color:var(--ok);border-color:#2d6a46}.badge.warn{color:var(--warn);border-color:#725b2d}
 footer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,#0b0d12 14%);padding:22px 12px max(12px,env(safe-area-inset-bottom))}
-#chat{max-height:52vh;overflow-y:auto;border:1px solid var(--line);border-radius:15px;padding:10px;background:#0f131a;display:flex;flex-direction:column;gap:10px}
-#chat:empty{display:none}
-#chat .card{margin:0}
 .composer{max-width:860px;margin:auto;background:#121720;border:1px solid var(--line);border-radius:16px;padding:10px}
 textarea{width:100%;height:78px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:7px}
 button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color:#17130a;font-weight:800;cursor:pointer}button.secondary{background:#262c38;color:#d9dfeb}button:disabled{opacity:.45}
@@ -36,6 +33,11 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <h1>AI 圓桌 · 工程協作</h1>
 <div class="sub">主工程師 × Reviewer × Vision × Web Search · 整包修軟體</div>
 </header>
+
+<div class="panel intro">
+<strong>工程模式：</strong>把 HTML / JS / CSS / JSON / MD / TXT / ZIP / PNG / JPG / WEBP 丟進來。<br>
+AI A 先修 → AI B Code Review → AI A 整合；Web Search 會區分已證實／推測／待驗證，若能安全修改，會產生可下載的修正版 ZIP。
+</div>
 
 <div class="panel">
 <div class="who">專案附件</div>
@@ -70,7 +72,12 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="small" style="margin-top:7px">只是想讓兩隻 AI 一起聊聊、不牽涉程式碼時打開；回覆更快更短，不會產生修正檔案。</div>
 </div>
 
-<div id="chat"></div>
+<div id="chat">
+<div class="card">
+<div class="who">提示</div>
+<pre>例如：幫我檢查這整包為什麼首頁大盤不見了；只修必要檔案，其他不要動。附上的截圖是目前異常畫面。</pre>
+</div>
+</div>
 </div>
 
 <footer>
@@ -103,7 +110,7 @@ function addCard(cls,who,text){
   const d=document.createElement("div");d.className="card "+cls;
   const w=document.createElement("div");w.className="who";w.textContent=who;
   const p=document.createElement("pre");p.textContent=text;
-  d.append(w,p);chat.append(d);chat.scrollTo({top:chat.scrollHeight,behavior:"smooth"});
+  d.append(w,p);chat.append(d);scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
   return d;
 }
 function renderFiles(){
@@ -271,11 +278,10 @@ async function run(){
   if(isChat){
     status.textContent="聊天中…";
     try{
-      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory,webSearch:webSearch.checked})});
+      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
-      if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
       addCard("a",d.labels?.a||"AI A",d.a);
       addCard("b",d.labels?.b||"AI B",d.b);
       chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
