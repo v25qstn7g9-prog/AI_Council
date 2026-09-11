@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.6 可插拔 AI</title>
+<title>AI 圓桌 v3.8.1 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -25,7 +25,6 @@ textarea{width:100%;height:78px;resize:none;background:transparent;border:0;outl
 button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color:#17130a;font-weight:800;cursor:pointer}button.secondary{background:#262c38;color:#d9dfeb}button:disabled{opacity:.45}
 .outputActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
 
-/* AI 對話區：固定高度，讓前面的卡片留在自己的對話框內，不會一直被新訊息往上推 */
 .chatBox{
   height:min(58vh,620px);
   min-height:320px;
@@ -99,7 +98,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.6 · 可插拔 AI</span>
+<span id="status" class="badge">v3.8.1 · 可插拔 AI</span>
 <div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
@@ -115,9 +114,9 @@ const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileSta
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
 const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
-let workspace=new Map(); // path -> {path,kind,file,content?,binary?}
+let workspace=new Map();
 let lastArtifact=null;
-let chatHistory=[]; // 閒聊模式用：[{who:"you"|"a"|"b",text}]，跟著對話累積
+let chatHistory=[];
 
 function ext(name){const p=String(name).split(".");return p.length>1?p.pop().toLowerCase():""}
 function human(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB"}
@@ -162,7 +161,6 @@ async function addZip(file){
   let count=0;
   for(const [path,entry] of Object.entries(z.files)){
     if(entry.dir)continue;
-    // 過濾 macOS 壓縮產生的垃圾檔（__MACOSX/ 資料夾、._ 開頭的隱藏檔、.DS_Store）
     const base=path.split("/").pop()||"";
     if(path.startsWith("__MACOSX/")||base.startsWith("._")||base===".DS_Store")continue;
     const e=ext(path);
@@ -249,12 +247,10 @@ function renderArtifact(artifact){
 async function downloadPatchedZip(artifact){
   if(typeof JSZip==="undefined")return alert("JSZip 尚未載入");
   const z=new JSZip();
-  // Preserve uploaded text/image workspace first.
   for(const x of workspace.values()){
     if(x.kind==="text")z.file(x.path,x.content||"");
     else if(x.kind==="image")z.file(x.path,await x.file.arrayBuffer());
   }
-  // Apply final complete-file replacements/new files.
   for(const f of artifact.files||[]){
     if(!f?.path||typeof f.content!=="string")continue;
     z.file(String(f.path).replace(/^\/+/,""),f.content);
@@ -269,8 +265,6 @@ function searchLabel(s){
   const m={no_api_key:"缺 TAVILY_API_KEY",auth_failed:"Tavily Key 驗證失敗",quota_or_rate_limit:"Tavily 額度/速率限制",network_error:"Tavily 連線失敗",no_results:"搜尋完成但無結果",disabled_by_user:"本題未搜尋"};
   return m[s.reason]||s.message||"未搜尋";
 }
-// 聊天模式下如果訊息帶有這些字眼，代表使用者其實想要查證/分析，
-// 自動退出聊天模式、切回完整工程審查流程。
 const CHAT_EXIT_KEYWORDS=["查","分析","查詢"];
 function shouldExitChatMode(text){
   return CHAT_EXIT_KEYWORDS.some(k=>text.includes(k));
