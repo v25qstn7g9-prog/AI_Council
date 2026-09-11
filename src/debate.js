@@ -30,7 +30,7 @@
  * 呼叫失敗時會自動退回 Cloudflare，並把失敗原因放進回應的 debug 欄位。
  */
 
-const VERSION = "3.8.3-thinkingconfig-fixed";
+const VERSION = "3.9-chatmode-websearch";
 const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Gemini 3.5 Flash-Lite（2.5 系列將於 2026-10 關閉）
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b"; // Gemini 沒設定或失敗時的備援
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -480,15 +480,25 @@ export async function onRequestPost(context) {
         .join("\n");
       const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
 
+      // 閒聊模式一樣可以開 Web Search；搜尋結果一併塞進訊息內容，
+      // 不管 askA/askB 內部實際用 Cloudflare 還是 Gemini 備援都收得到。
+      const chatWebSearchRequested = body?.webSearch === true;
+      const chatSearch = chatWebSearchRequested
+        ? await searchWeb(env, q)
+        : { ok:true, used:false, reason:"disabled_by_user", message:"Web Search 已關閉", text:"", resultCount:0 };
+      const chatSearchNote = chatSearch.used && chatSearch.text
+        ? `\n\n【Web Search 資料，若跟話題相關可參考，並註明是查到的資訊】\n${chatSearch.text}`
+        : "";
+
       const aResult = await askA(env.AI, env, [
         { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
-        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
+        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}${chatSearchNote}` },
       ], 500, 0.6);
       const a = aResult.text;
 
       const bResult = await askB(env.AI, env, [
         { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
-        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
+        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}${chatSearchNote}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
       ], 500, 0.6);
       const b = bResult.text;
 
@@ -499,6 +509,12 @@ export async function onRequestPost(context) {
         chatMode:true,
         labels:{ a:aResult.source, b:bResult.source },
         a, b,
+        webSearchRequested: chatWebSearchRequested,
+        search:{
+          ok:Boolean(chatSearch.ok), used:Boolean(chatSearch.used),
+          reason:chatSearch.reason, message:chatSearch.message,
+          resultCount:Number(chatSearch.resultCount||0),
+        },
         debug:[aResult.debug, bResult.debug].filter(Boolean).join("\n") || undefined,
       });
     }
