@@ -72,8 +72,8 @@
     "COUNCIL_A_PROVIDER": "cloudflare",
     "COUNCIL_B_PROVIDER": "cloudflare",
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
-    "GITHUB_OWNER": "",
-    "GITHUB_REPO": "",
+    "GITHUB_OWNER": "v25qstn7g9-prog",
+    "GITHUB_REPO": "AI_Council",
     "GITHUB_BASE_BRANCH": "main"
   }
 }
