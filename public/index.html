@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.8.1 · 工程協作</title>
+<title>AI 圓桌 v3.9.0 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -54,8 +54,8 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <body>
 <div class="app">
 <header>
-<h1>AI 圓桌 · 工程協作</h1>
-<div class="sub">主工程師 × Reviewer × Vision × Web Search · 整包修軟體</div>
+<h1>AI 圓桌 v3.9.0 · 工程協作</h1>
+<div class="sub">主工程師 × Reviewer × Vision × Web Search · 整包修軟體（已優化效能與錯誤防護）</div>
 </header>
 
 <div class="panel">
@@ -64,7 +64,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
   點我選檔，或把檔案拖進來<br>
   <span class="small">文字檔、ZIP、截圖都可；建議一次不要超過 30 個文字檔 / 4 張圖片</span>
 </div>
-<input id="picker" type="file" multiple hidden accept=".html,.htm,.js,.mjs,.cjs,.css,.json,.md,.txt,.xml,.yaml,.yml,.toml,.csv,.zip,image/png,image/jpeg,image/webp"/>
+<input id="picker" type="file" multiple hidden accept=".html,.htm,.js,.mjs,.cjs,.css,.json,.jsonc,.md,.txt,.xml,.yaml,.yml,.toml,.csv,.env,.zip,image/png,image/jpeg,image/webp"/>
 <div id="files" class="files"></div>
 <div id="fileStats" class="small" style="margin-top:8px">尚未加入附件</div>
 </div>
@@ -98,7 +98,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.8.1 · 可插拔 AI</span>
+<span id="status" class="badge">v3.9.0 · 可插拔 AI</span>
 <div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
@@ -177,11 +177,15 @@ async function addZip(file){
   if(!count)throw Error("ZIP 裡沒有可讀的文字檔或圖片");
 }
 async function ingest(list){
+  status.textContent="讀取檔案中…";
+  send.disabled=true;
   const errors=[];
   for(const f of list){
     try{await addLoose(f)}catch(e){errors.push(`${f.name}：${e.message}`)}
   }
   renderFiles();
+  status.textContent="v3.9.0 · 可插拔 AI";
+  send.disabled=false;
   if(errors.length)addCard("err","附件略過",errors.join("\n"));
 }
 drop.onclick=()=>picker.click();
@@ -200,9 +204,29 @@ chatModeEl.onchange=()=>{
 };
 
 async function imageDataUrl(file){
-  if(file.size>2.5*1024*1024)throw Error(`${file.name} 超過 2.5MB，請先縮圖`);
+  if(file.size>5*1024*1024)throw Error(`${file.name} 超過 5MB，請先縮圖`);
   return new Promise((resolve,reject)=>{
-    const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error("圖片讀取失敗"));r.readAsDataURL(file);
+    const r=new FileReader();
+    r.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const canvas=document.createElement('canvas');
+        let w=img.width, h=img.height;
+        const max=2048;
+        if(w>max || h>max){
+          if(w>h){h=Math.round(h*(max/w));w=max;}
+          else{w=Math.round(w*(max/h));h=max;}
+        }
+        canvas.width=w; canvas.height=h;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',0.85));
+      };
+      img.onerror=()=>reject(Error("圖片載入失敗"));
+      img.src=e.target.result;
+    };
+    r.onerror=()=>reject(Error("圖片讀取失敗"));
+    r.readAsDataURL(file);
   });
 }
 function buildPayloadFiles(){
@@ -246,18 +270,25 @@ function renderArtifact(artifact){
 }
 async function downloadPatchedZip(artifact){
   if(typeof JSZip==="undefined")return alert("JSZip 尚未載入");
-  const z=new JSZip();
-  for(const x of workspace.values()){
-    if(x.kind==="text")z.file(x.path,x.content||"");
-    else if(x.kind==="image")z.file(x.path,await x.file.arrayBuffer());
+  try{
+    status.textContent="打包 ZIP 中…";
+    const z=new JSZip();
+    for(const x of workspace.values()){
+      if(x.kind==="text")z.file(x.path,x.content||"");
+      else if(x.kind==="image")z.file(x.path,await x.file.arrayBuffer());
+    }
+    for(const f of artifact.files||[]){
+      if(!f?.path||typeof f.content!=="string")continue;
+      z.file(String(f.path).replace(/^\/+/,""),f.content);
+    }
+    const blob=await z.generateAsync({type:"blob",compression:"DEFLATE"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="AI圓桌_修正版專案.zip";a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+    status.textContent="v3.9.0 · 下載完成";
+  }catch(e){
+    alert("打包失敗: "+e.message);
+    status.textContent="打包失敗";
   }
-  for(const f of artifact.files||[]){
-    if(!f?.path||typeof f.content!=="string")continue;
-    z.file(String(f.path).replace(/^\/+/,""),f.content);
-  }
-  const blob=await z.generateAsync({type:"blob",compression:"DEFLATE"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="AI圓桌_修正版專案.zip";a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
 function searchLabel(s){
   if(!s)return "搜尋狀態未知";
@@ -313,6 +344,17 @@ async function run(){
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
 
     if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
+    if(Array.isArray(d.filesReceived)){
+      const cut=d.filesReceived.filter(f=>f?.truncated);
+      if(cut.length){
+        addCard("err","⚠️ 附件被截斷",
+          `以下 ${cut.length} 個檔案內容太長，只送出前面一部分給 AI，AI 的分析可能沒看到完整檔案：\n- `+cut.map(f=>f.path).join("\n- ")+
+          `\n\n建議：只上傳跟這次問題有關的檔案，或把大檔案拆小再上傳。`);
+      }
+    }
+    if(d.reviewerTruncated){
+      addCard("card","⚠️ Reviewer 上下文不足","專案內容較大，Reviewer（B）能力有限，這次只看了部分內容做審查，審查結果可能不完整。");
+    }
     if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
     if(Array.isArray(d.imageReports)&&d.imageReports.length){
       addCard("card","🖼️ 圖片分析",d.imageReports.map(x=>`${x.name}\n${x.text}`).join("\n\n"));
@@ -323,7 +365,8 @@ async function run(){
     else addCard("judge","最終整合",d.final||"已完成");
     status.textContent=`完成 · ${d.version}`;
   }catch(e){
-    addCard("err","工程會議失敗",e.message);status.textContent="失敗";
+    addCard("err","工程會議失敗",e.message);
+    status.textContent="失敗";
   }finally{send.disabled=false;q.focus()}
 }
 send.onclick=run;
