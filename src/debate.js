@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.8.2-gemini-config-fix
+ * debate.js — ai-council-v3.9.0-truncation-visibility
  *
  * POST /debate
  * body:
@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "3.8.2-gemini-config-fix";
+const VERSION = "3.9.0-truncation-visibility";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -202,7 +202,7 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       }
     }
     const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `GPT-OSS 120B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    return { text, source: `GPT-OSS 120B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
 
@@ -222,7 +222,7 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       }
     }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `Qwen3 30B（${provider} 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    return { text, source: `Qwen3 30B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
   }
 }
 
@@ -348,7 +348,7 @@ function buildProjectContext(files, imageReports, options = {}) {
     }
   }
   if (truncatedByBudget) parts.push("\n【注意】此版本的 Reviewer 上下文因模型 context budget 被截斷；不得把未看到的檔案內容當成已檢查。 ");
-  return parts.join("\n");
+  return { text: parts.join("\n"), truncatedByBudget };
 }
 
 function extractJson(text) {
@@ -456,7 +456,7 @@ export async function onRequestPost(context) {
       imageReports.push(await analyzeImage(env.AI, image));
     }
 
-    const projectContext = buildProjectContext(files, imageReports);
+    const projectContext = buildProjectContext(files, imageReports).text;
     const searchNote = search.used && search.text
       ? `\n\n【Web Search 資料】\n${search.text}`
       : "";
@@ -491,10 +491,11 @@ ${searchNote}
     ], 1700, 0.25);
     const a = aResult.text;
 
-    const reviewerProjectContext = buildProjectContext(files, imageReports, {
+    const reviewerContext = buildProjectContext(files, imageReports, {
       maxTotalChars: MAX_REVIEW_CONTEXT_CHARS,
       maxFileChars: MAX_REVIEW_FILE_CHARS,
     });
+    const reviewerProjectContext = reviewerContext.text;
 
     const reviewPrompt = `【原始任務】
 ${q}
@@ -593,6 +594,7 @@ ${b}
       artifact,
       debug:[aResult.debug, bResult.debug, finalResult.debug].filter(Boolean).join("\n") || undefined,
       filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
+      reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
       imageReports,
       webSearchRequested,
       search:{
