@@ -34,11 +34,32 @@
   ],
 
   // ============================================
+  // 自我健檢排程（Cron Trigger）
+  // ============================================
+  // 時間是 UTC。範例是「每週一 03:00 UTC」（= 台灣時間週一 11:00）。
+  // 要改頻率就改這個 cron 字串即可，不用改程式碼。
+  "triggers": {
+    "crons": ["0 3 * * 1"]
+  },
+
+  // ============================================
   // Web Search（選用）
   // ============================================
   // 請用 Secret 設定：
   //   wrangler secret put GEMINI_API_KEY
   //   wrangler secret put TAVILY_API_KEY
+
+  // ============================================
+  // 自我健檢（選用；不設定的話排程跟手動端點都會直接報錯，其他功能不受影響）
+  // ============================================
+  // 請用 Secret 設定：
+  //   wrangler secret put GITHUB_TOKEN         → GitHub Personal Access Token，
+  //                                               需要對這個 repo 有 Contents + Pull requests + Issues 的讀寫權限
+  //   wrangler secret put SELF_REVIEW_TOKEN    → 你自己設一組密碼，手動觸發 /self-review 時要帶這組
+  // 並在下面 vars 補上：
+  //   GITHUB_OWNER        → GitHub 帳號或組織名稱
+  //   GITHUB_REPO         → 這個 repo 的名稱
+  //   GITHUB_BASE_BRANCH  → 要開 PR 進去的分支，通常是 "main"
 
   // ============================================
   // 環境變數
@@ -50,6 +71,9 @@
     "COUNCIL_ENABLED": "true",
     "COUNCIL_A_PROVIDER": "cloudflare",
     "COUNCIL_B_PROVIDER": "cloudflare",
-    "GEMINI_MODEL": "gemini-3.5-flash-lite"
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "GITHUB_OWNER": "",
+    "GITHUB_REPO": "",
+    "GITHUB_BASE_BRANCH": "main"
   }
 }

@@ -114,7 +114,13 @@ wrangler deploy
 
 ## 版本
 
-- v3.9.0：前端會顯示「哪些附件被截斷」的警示，Reviewer 因專案過大只審查部分內容時也會提示；修正備援標籤文字容易誤讀的問題（原本寫法會讓人誤以為是該 provider 自己的備援，其實是改用 Cloudflare）；修正一處提示文字多出的分號錯字；檔案選擇視窗補上 .jsonc / .env
+- v3.9.0：
+  - **新增自我健檢功能**：排程（每週）自動審查專案自己的原始碼，找到問題就開 GitHub Pull Request，
+    沒問題就開一張 Issue 留報告——兩者都**不會自動 merge／關閉**，一定要人工看過才會真的生效。
+    也可以用 `POST /self-review`（需帶 `SELF_REVIEW_TOKEN`）手動立刻跑一次，不用等排程。
+  - 前端會顯示「哪些附件被截斷」的警示，Reviewer 因專案過大只審查部分內容時也會提示
+  - 修正備援標籤文字容易誤讀的問題（原本寫法會讓人誤以為是該 provider 自己的備援，其實是改用 Cloudflare）
+  - 修正一處提示文字多出的分號錯字；檔案選擇視窗補上 .jsonc / .env
 - v3.8.1：前後端版本號全面對齊，強化 Gemini 3.5 備援與 JSON 容錯
 - v3.7：Cloudflare 失敗時自動切換 Gemini 3.5 Flash-Lite，A / B 皆支援；保留原本可插拔 Provider 與反向備援
 - v3.6：可插拔 AI Provider 正式版
@@ -133,3 +139,42 @@ wrangler deploy
 - Variable：`CLOUDFLARE_ACCOUNT_ID`（Cloudflare Account ID）
 
 開啟 `https://你的-worker.workers.dev/usage` 可看到 JSON：今日額度、已使用 Neurons、剩餘 Neurons、使用率與下一次重置時間。
+
+## 自我健檢（AI 圓桌審查自己的原始碼）
+
+這個功能讓 AI 圓桌定期（或手動）拿自己的原始碼當「案子」，跑一次跟平常一樣的 A 主工程師 → B Reviewer → 最終整合流程，把結果做成 GitHub Pull Request 或 Issue。
+
+**設計上刻意不做成全自動升級**：
+
+- 找到問題／可以改善的地方 → 開一個新分支、提出修改、開 **Pull Request** 到你設定的 base branch（例如 `main`）。
+- 沒有找到值得改的地方 → 開一張 **Issue**，留下健檢報告，不會硬找東西改。
+- 兩種情況都**不會自動 merge PR，也不會自動關閉 Issue**。要不要真的採用，永遠是你自己看過、自己按下去決定的。
+- 只審查固定白名單裡的檔案（`src/*.js`、`public/index.html`、`wrangler.jsonc`、`README.md`），不會自己亂猜或亂讀白名單以外的東西。
+
+### 設定步驟
+
+1. 到 GitHub 建立一個 Personal Access Token（Fine-grained token 即可），範圍只給這個 repo，權限至少要有：
+   - Contents：Read and write
+   - Pull requests：Read and write
+   - Issues：Read and write
+2. 設定 Secrets 與 Variables：
+
+   ```bash
+   wrangler secret put GITHUB_TOKEN
+   wrangler secret put SELF_REVIEW_TOKEN   # 自己隨便設一組密碼，手動觸發時要用
+   ```
+
+   並在 `wrangler.jsonc` 的 `vars` 填上 `GITHUB_OWNER`、`GITHUB_REPO`、`GITHUB_BASE_BRANCH`（通常是 `main`）。
+
+3. 排程預設是每週一 03:00 UTC（台灣時間週一 11:00），要改頻率就改 `wrangler.jsonc` 裡 `triggers.crons` 的 cron 字串。
+
+### 手動立刻跑一次（不用等排程）
+
+因為這個動作會消耗 AI 額度、還會在你的 GitHub repo 開 PR/Issue，所以**沒有**做成公開頁面上一按就跑的按鈕，只能帶著你自己設定的 `SELF_REVIEW_TOKEN` 用指令觸發：
+
+```bash
+curl -X POST "https://你的-worker.workers.dev/self-review" \
+  -H "x-self-review-token: 你設定的SELF_REVIEW_TOKEN"
+```
+
+沒有設定 `SELF_REVIEW_TOKEN` 的話，這個手動端點會直接回報「已停用」，但排程仍會照常執行（`GITHUB_TOKEN` 等設定要有才跑得動）。
