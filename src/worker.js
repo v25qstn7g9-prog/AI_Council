@@ -12,7 +12,10 @@
  *   留一份健檢報告」。永遠不會自動 merge PR，最後按下去部署的人一定是你自己。
  * - 排程頻率設在 wrangler.jsonc 的 triggers.crons。
  * - 手動觸發是為了不想等排程時使用；因為會消耗 AI 額度、還會在你的 GitHub repo 開 PR/Issue，
- *   所以刻意沒有做成公開頁面上的按鈕，必須帶對 SELF_REVIEW_TOKEN 這個 Secret 才能觸發：
+ *   所以刻意沒有做成公開頁面上的按鈕，必須帶對 SELF_REVIEW_TOKEN 這個 Secret 才能觸發。
+ *   支援 GET 也支援 POST，方便直接在手機瀏覽器網址列貼上以下網址就能觸發（不需要終端機）：
+ *     https://你的-worker.workers.dev/self-review?token=你設定的token
+ *   或用指令（有終端機的話）：
  *     curl -X POST "https://你的-worker.workers.dev/self-review" -H "x-self-review-token: 你設定的token"
  *   沒有設定 SELF_REVIEW_TOKEN 的話，這個手動端點會直接拒絕，只有排程還能跑。
  */
@@ -64,7 +67,7 @@ export default {
       return usageHandler({ request, env, ctx });
     }
 
-    if (url.pathname === "/self-review" && request.method === "POST") {
+    if (url.pathname === "/self-review" && (request.method === "POST" || request.method === "GET")) {
       return handleSelfReviewRequest(request, env);
     }
 
