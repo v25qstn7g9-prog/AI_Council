@@ -390,78 +390,27 @@ async function checkRateLimit(env, ip) {
   return { ok:true };
 }
 
-export async function onRequestPost(context) {
-  try {
-    const { request, env } = context;
+export async function runEngineeringCouncil({ env, question, rawFiles, rawImages, webSearch }) {
+  const files = normalizeFiles(rawFiles);
+  const images = Array.isArray(rawImages) ? rawImages.slice(0, MAX_IMAGES) : [];
+  const q = question;
 
-    if (String(env.COUNCIL_ENABLED || "true").toLowerCase() === "false") {
-      return out({ error:"AI 圓桌目前休會中 🛑" }, 503);
-    }
-    if (!env.AI) return out({ error:"尚未設定 Cloudflare AI Binding（Variable name: AI）" }, 500);
+  const webSearchRequested = webSearch === true;
+  const search = webSearchRequested
+    ? await searchWeb(env, q)
+    : { ok:true, used:false, reason:"disabled_by_user", message:"Web Search 已關閉", text:"", resultCount:0 };
 
-    const ip = request.headers.get("cf-connecting-ip") || "";
-    const rl = await checkRateLimit(env, ip);
-    if (!rl.ok) return out({ error:rl.message }, 429);
+  const imageReports = [];
+  for (const image of images) {
+    imageReports.push(await analyzeImage(env.AI, image));
+  }
 
-    const body = await request.json().catch(() => null);
-    const q = String(body?.question || "").trim();
-    if (!q) return out({ error:"沒有收到任務說明" }, 400);
-    if (q.length > MAX_Q) return out({ error:"任務說明太長" }, 400);
+  const projectContext = buildProjectContext(files, imageReports).text;
+  const searchNote = search.used && search.text
+    ? `\n\n【Web Search 資料】\n${search.text}`
+    : "";
 
-    const files = normalizeFiles(body?.files);
-    const images = Array.isArray(body?.images) ? body.images.slice(0,MAX_IMAGES) : [];
-    const chatMode = body?.chatMode === true;
-
-    if (chatMode) {
-      const rawHistory = Array.isArray(body?.history) ? body.history.slice(-12) : [];
-      const historyText = rawHistory
-        .map(h => {
-          const label = h?.who === "you" ? "使用者" : h?.who === "a" ? "AI A" : h?.who === "b" ? "AI B" : "";
-          return label ? `${label}：${String(h.text || "").slice(0, 800)}` : "";
-        })
-        .filter(Boolean)
-        .join("\n");
-      const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
-
-      const aResult = await askA(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
-        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
-      ], 500, 0.6);
-      const a = aResult.text;
-
-      const bResult = await askB(env.AI, env, [
-        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
-        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
-      ], 500, 0.6);
-      const b = bResult.text;
-
-      return out({
-        ok:true,
-        version:VERSION,
-        providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
-        chatMode:true,
-        labels:{ a:aResult.source, b:bResult.source },
-        a, b,
-        debug:[aResult.debug, bResult.debug].filter(Boolean).join("\n") || undefined,
-      });
-    }
-
-    const webSearchRequested = body?.webSearch === true;
-    const search = webSearchRequested
-      ? await searchWeb(env, q)
-      : { ok:true, used:false, reason:"disabled_by_user", message:"Web Search 已關閉", text:"", resultCount:0 };
-
-    const imageReports = [];
-    for (const image of images) {
-      imageReports.push(await analyzeImage(env.AI, image));
-    }
-
-    const projectContext = buildProjectContext(files, imageReports).text;
-    const searchNote = search.used && search.text
-      ? `\n\n【Web Search 資料】\n${search.text}`
-      : "";
-
-    const engineerPrompt = `使用者任務：
+  const engineerPrompt = `使用者任務：
 ${q}
 
 ${projectContext || "（本題沒有上傳文字檔或圖片）"}
@@ -485,19 +434,19 @@ ${searchNote}
 10. 若來源彼此衝突，要明確指出衝突，不可自行選一個當真。
 11. 引用 Web Search 資料時，盡量保留來源名稱或 URL，讓使用者能核對。`;
 
-    const aResult = await askA(env.AI, env, [
-      { role:"system", content:"你是資深全端工程師，擅長 HTML/JS/Cloudflare/Vercel、除錯、版本整合。用繁體中文，精準務實。" },
-      { role:"user", content:engineerPrompt },
-    ], 1700, 0.25);
-    const a = aResult.text;
+  const aResult = await askA(env.AI, env, [
+    { role:"system", content:"你是資深全端工程師，擅長 HTML/JS/Cloudflare/Vercel、除錯、版本整合。用繁體中文，精準務實。" },
+    { role:"user", content:engineerPrompt },
+  ], 1700, 0.25);
+  const a = aResult.text;
 
-    const reviewerContext = buildProjectContext(files, imageReports, {
-      maxTotalChars: MAX_REVIEW_CONTEXT_CHARS,
-      maxFileChars: MAX_REVIEW_FILE_CHARS,
-    });
-    const reviewerProjectContext = reviewerContext.text;
+  const reviewerContext = buildProjectContext(files, imageReports, {
+    maxTotalChars: MAX_REVIEW_CONTEXT_CHARS,
+    maxFileChars: MAX_REVIEW_FILE_CHARS,
+  });
+  const reviewerProjectContext = reviewerContext.text;
 
-    const reviewPrompt = `【原始任務】
+  const reviewPrompt = `【原始任務】
 ${q}
 
 【專案上下文】
@@ -521,13 +470,13 @@ ${a}
 - 若來源不足，必須要求降級成「待驗證」，不可硬下結論
 最後給出「必修 / 建議 / 不要改」三區。`;
 
-    const bResult = await askB(env.AI, env, [
-      { role:"system", content:"你是嚴格但務實的軟體 Code Reviewer。用繁體中文，不為反對而反對。" },
-      { role:"user", content:reviewPrompt },
-    ], 1500, 0.25);
-    const b = bResult.text;
+  const bResult = await askB(env.AI, env, [
+    { role:"system", content:"你是嚴格但務實的軟體 Code Reviewer。用繁體中文，不為反對而反對。" },
+    { role:"user", content:reviewPrompt },
+  ], 1500, 0.25);
+  const b = bResult.text;
 
-    const finalPrompt = `你現在是最終整合工程師。
+  const finalPrompt = `你現在是最終整合工程師。
 
 【任務】
 ${q}
@@ -573,37 +522,96 @@ ${b}
 - 「建議下一步查詢」不能被寫成已發生事實。
 - 最終摘要要優先呈現已證實因素；推測與待驗證放後面。`;
 
-    const finalResult = await askA(env.AI, env, [
-      { role:"system", content:"你是軟體專案最終整合工程師。嚴格輸出有效 JSON。" },
-      { role:"user", content:finalPrompt },
-    ], FINAL_MAX_TOKENS, 0.15);
-    const finalRaw = finalResult.text;
+  const finalResult = await askA(env.AI, env, [
+    { role:"system", content:"你是軟體專案最終整合工程師。嚴格輸出有效 JSON。" },
+    { role:"user", content:finalPrompt },
+  ], FINAL_MAX_TOKENS, 0.15);
+  const finalRaw = finalResult.text;
 
-    const artifact = extractJson(finalRaw);
-    const finalText = artifact
-      ? [artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
-      : finalRaw;
+  const artifact = extractJson(finalRaw);
+  const finalText = artifact
+    ? [artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
+    : finalRaw;
 
-    return out({
-      ok:true,
-      version:VERSION,
-      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
-      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
-      a, b,
-      final:finalText,
-      artifact,
-      debug:[aResult.debug, bResult.debug, finalResult.debug].filter(Boolean).join("\n") || undefined,
-      filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
-      reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
-      imageReports,
-      webSearchRequested,
-      search:{
-        ok:Boolean(search.ok), used:Boolean(search.used),
-        reason:search.reason, message:search.message,
-        resultCount:Number(search.resultCount||0),
-        ...(search.detail ? {detail:search.detail} : {})
-      }
+  return {
+    version:VERSION,
+    providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
+    labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
+    a, b,
+    final:finalText,
+    artifact,
+    debug:[aResult.debug, bResult.debug, finalResult.debug].filter(Boolean).join("\n") || undefined,
+    filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
+    reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
+    imageReports,
+    webSearchRequested,
+    search:{
+      ok:Boolean(search.ok), used:Boolean(search.used),
+      reason:search.reason, message:search.message,
+      resultCount:Number(search.resultCount||0),
+      ...(search.detail ? {detail:search.detail} : {})
+    }
+  };
+}
+
+export async function onRequestPost(context) {
+  try {
+    const { request, env } = context;
+
+    if (String(env.COUNCIL_ENABLED || "true").toLowerCase() === "false") {
+      return out({ error:"AI 圓桌目前休會中 🛑" }, 503);
+    }
+    if (!env.AI) return out({ error:"尚未設定 Cloudflare AI Binding（Variable name: AI）" }, 500);
+
+    const ip = request.headers.get("cf-connecting-ip") || "";
+    const rl = await checkRateLimit(env, ip);
+    if (!rl.ok) return out({ error:rl.message }, 429);
+
+    const body = await request.json().catch(() => null);
+    const q = String(body?.question || "").trim();
+    if (!q) return out({ error:"沒有收到任務說明" }, 400);
+    if (q.length > MAX_Q) return out({ error:"任務說明太長" }, 400);
+
+    const chatMode = body?.chatMode === true;
+
+    if (chatMode) {
+      const rawHistory = Array.isArray(body?.history) ? body.history.slice(-12) : [];
+      const historyText = rawHistory
+        .map(h => {
+          const label = h?.who === "you" ? "使用者" : h?.who === "a" ? "AI A" : h?.who === "b" ? "AI B" : "";
+          return label ? `${label}：${String(h.text || "").slice(0, 800)}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+      const historyBlock = historyText ? `\n\n【先前對話】\n${historyText}\n` : "";
+
+      const aResult = await askA(env.AI, env, [
+        { role:"system", content:"你是AI圓桌的其中一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，自然聊天，記得先前對話內容，不用寫成報告格式，簡潔直接。" },
+        { role:"user", content:`${historyBlock}\n使用者現在說：\n${q}` },
+      ], 500, 0.6);
+      const a = aResult.text;
+
+      const bResult = await askB(env.AI, env, [
+        { role:"system", content:"你是AI圓桌的另一位成員，正在跟使用者與另一位AI進行連續對話。用繁體中文，記得先前對話內容，看過前一位的回答後自然接話：可以補充、可以有不同意見，像聊天一樣，不用寫成報告格式。" },
+        { role:"user", content:`${historyBlock}\n使用者剛剛說：\n${q}\n\n對方（AI A）剛剛說：\n${a}\n\n換你接話。` },
+      ], 500, 0.6);
+      const b = bResult.text;
+
+      return out({
+        ok:true,
+        version:VERSION,
+        providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
+        chatMode:true,
+        labels:{ a:aResult.source, b:bResult.source },
+        a, b,
+        debug:[aResult.debug, bResult.debug].filter(Boolean).join("\n") || undefined,
+      });
+    }
+
+    const result = await runEngineeringCouncil({
+      env, question:q, rawFiles:body?.files, rawImages:body?.images, webSearch:body?.webSearch === true,
     });
+    return out({ ok:true, ...result });
   } catch (e) {
     const s = String(e?.message || e || "");
     return out({
