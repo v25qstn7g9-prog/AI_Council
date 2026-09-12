@@ -1,4 +1,4 @@
-# AI 圓桌 v3.8.1｜Cloudflare 自動切 Gemini 3.5 備援版
+# AI 圓桌 v3.9.0｜Cloudflare 自動切 Gemini 3.5 備援版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -73,7 +73,7 @@ wrangler secret put TAVILY_API_KEY
 - 單一文字檔最多送 30,000 字元
 - 全部文字附件合計最多 180,000 字元
 - 圖片最多 4 張
-- 單張圖片前端限制約 2.5 MB
+- 單張圖片前端限制 5 MB（上傳前會自動壓縮縮圖到長邊 2048px、JPEG 85% 品質再送出）
 
 大專案建議只上傳和問題相關的檔案，或先打包精簡版。
 
@@ -114,6 +114,7 @@ wrangler deploy
 
 ## 版本
 
+- v3.9.0：前端會顯示「哪些附件被截斷」的警示，Reviewer 因專案過大只審查部分內容時也會提示；修正備援標籤文字容易誤讀的問題（原本寫法會讓人誤以為是該 provider 自己的備援，其實是改用 Cloudflare）；修正一處提示文字多出的分號錯字；檔案選擇視窗補上 .jsonc / .env
 - v3.8.1：前後端版本號全面對齊，強化 Gemini 3.5 備援與 JSON 容錯
 - v3.7：Cloudflare 失敗時自動切換 Gemini 3.5 Flash-Lite，A / B 皆支援；保留原本可插拔 Provider 與反向備援
 - v3.6：可插拔 AI Provider 正式版
