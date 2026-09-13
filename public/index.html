@@ -430,12 +430,12 @@ function triggerSendFromTouch(e){
   run();
   setTimeout(()=>{sendGestureHandled=false},700);
 }
-// 關鍵：瀏覽器「要不要把目前聚焦的輸入框失焦、收起鍵盤」這個決定，是在
-// pointerdown（手指剛碰到螢幕那一刻）就已經定案了——比 touchend/click 早得多。
-// 下面這些監聽器都只在 touchend 之後才 preventDefault，那時候鍵盤已經在收起
-// 的路上，這就是「鍵盤開著時按第一下沒反應、要點兩次」的成因。這裡在
-// pointerdown 就先攔截，阻止預設的失焦行為，讓鍵盤在點擊送出鍵時維持原狀、
-// 不會被硬收起，後面 touchend/click 還是照樣正常觸發 run()。
+// 這裡改成不攔截 pointerdown 的預設行為，讓 iOS 用自己原生的方式決定要不要
+// 收鍵盤／讓輸入框失焦；不再靠「preventDefault 讓鍵盤維持開啟」這招（那招
+// 在部分 iOS 版本會連 iOS 原生的失焦動作也一起取消，反而更不可靠）。
+// 改成直接在 pointerdown 當下就觸發 triggerSendFromTouch()，不等 iOS 決定
+// 完才送出——送出跟收鍵盤兩件事分開處理，run() 裡面會自己呼叫
+// forceDismissKeyboard() 確保鍵盤真的收起來。
 send.addEventListener("pointerdown",e=>{
   if(send.disabled)return;
   // 不再 preventDefault：讓 iOS 自己完成 textarea 的原生失焦/收鍵盤。
