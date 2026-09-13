@@ -396,6 +396,25 @@ function extractFileBlocks(text) {
   return { files, truncated: files.some((f) => f.truncated) };
 }
 
+// 救援用：模型如果沒照新格式寫、還是把檔案內容包進 JSON 的舊寫法
+// （"files":[{"path":...,"content":...}]），這裡不依賴整份 JSON 能不能完整解析——
+// 只要某一個 {"path":...,"content":...} 物件本身有頭有尾、沒被截斷，
+// 就用 regex 把它單獨撈出來，跟同一份回覆裡其他地方是否被截斷無關。
+function extractLegacyEmbeddedFiles(text) {
+  const s = String(text || "");
+  const re = /\{\s*"path"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  const files = [];
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    try {
+      const path = JSON.parse(`"${m[1]}"`);
+      const content = JSON.parse(`"${m[2]}"`);
+      if (path) files.push({ path, content, truncated: false });
+    } catch {}
+  }
+  return files;
+}
+
 async function checkRateLimit(env, ip) {
   const raw = String(env.COUNCIL_RATE_LIMIT || DEFAULT_RATE_LIMIT);
   const [maxStr, windowStr] = raw.split(":");
@@ -537,7 +556,26 @@ ${b}
 （這裡放完整檔案內容，原始文字，不要加引號跳脫，不要用 markdown code fence 包住）
 =====ENDFILE=====
 
+範例（照這個格式輸出，不要自己發明別的寫法）：
+\`\`\`json
+{
+  "summary": "修好了 index.html 的語法錯誤",
+  "rootCause": "缺少結尾括號",
+  "verified": [],
+  "inferences": [],
+  "pending": [],
+  "sources": [],
+  "review": ["語法已檢查通過"],
+  "instructions": ["下載後直接覆蓋原檔案"]
+}
+\`\`\`
+=====FILE:index.html=====
+<!doctype html>
+<html>...這裡放完整檔案內容，直接寫，不要加反斜線跳脫...</html>
+=====ENDFILE=====
+
 規則：
+- 絕對不要把檔案內容放進 JSON 的任何欄位裡（不要有 "files" 或 "content" 這種 JSON key）；不管你多習慣寫成 JSON，這次一定要用上面的 =====FILE=====／=====ENDFILE===== 純文字格式，這是唯一允許的寫法。
 - 只修改必要檔案；不確定的檔案不要生成；沒有要改的檔案就完全不要輸出 FILE 區塊。
 - 不得省略檔案內容或用「其餘不變」。
 - 不能把圖片當文字檔輸出。
@@ -550,7 +588,7 @@ ${b}
 - 檔案內容一定要放在 JSON 區塊「之後」，兩段不要交錯。`;
 
   const finalResult = await askA(env.AI, env, [
-    { role:"system", content:"你是軟體專案最終整合工程師。第一段輸出 fenced JSON 說明，第二段用 FILE 分隔符輸出檔案內容，不要把檔案內容塞進 JSON 字串裡。" },
+    { role:"system", content:"你是軟體專案最終整合工程師。輸出格式固定兩段：先是 fenced JSON 說明（不含檔案內容），再用 =====FILE=====／=====ENDFILE===== 純文字格式輸出每個檔案。絕對不要把檔案內容包進 JSON 欄位裡，就算這是你平常的習慣寫法也不可以。" },
     { role:"user", content:finalPrompt },
   ], FINAL_MAX_TOKENS, 0.15);
   const finalRaw = finalResult.text;
@@ -559,11 +597,33 @@ ${b}
   // 分隔符傳輸，不受 JSON 跳脫/截斷影響，就算長度上限被打斷，也只會少幾行程式碼，
   // 不會讓整包回覆（連帶已經完整生成的說明文字）一起變成無法解析的廢文字。
   const metaJson = extractJson(finalRaw);
-  const { files: parsedFiles, truncated: filesTruncated } = extractFileBlocks(finalRaw);
-  const artifact = metaJson || parsedFiles.length
-    ? { ...(metaJson || {}), files: parsedFiles }
+  const { files: newFormatFiles, truncated: filesTruncated } = extractFileBlocks(finalRaw);
+
+  let files = newFormatFiles;
+  let usedLegacyRecovery = false;
+  if (!files.length) {
+    // 模型沒照新格式寫（還是習慣把檔案塞進 JSON 的 "files" 欄位），這裡退回救援：
+    // 先看 metaJson.files 能不能直接讀到；如果外層 JSON 整個因為截斷而解析失敗
+    // （metaJson 是 null），再用寬鬆的 regex 逐個撈出「本身完整收尾」的檔案物件——
+    // 就算同一份回覆裡其他地方被截斷，只要某個檔案自己有頭有尾，還是救得回來。
+    const fromMeta = Array.isArray(metaJson?.files)
+      ? metaJson.files.filter((f) => f?.path && typeof f.content === "string")
+      : [];
+    const fromLenient = extractLegacyEmbeddedFiles(finalRaw);
+    const seen = new Set();
+    files = [...fromMeta, ...fromLenient].filter((f) => {
+      if (seen.has(f.path)) return false;
+      seen.add(f.path);
+      return true;
+    });
+    usedLegacyRecovery = files.length > 0;
+  }
+
+  const artifact = metaJson || files.length
+    ? { ...(metaJson || {}), files }
     : null;
-  if (artifact && filesTruncated) {
+  const treatAsTruncated = filesTruncated || (usedLegacyRecovery && !metaJson);
+  if (artifact && treatAsTruncated) {
     artifact.instructions = [
       ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
       "⚠️ 有檔案內容疑似因為回覆長度上限被截斷，下載後請比對檔案結尾是否完整（例如 index.html 應該以 </html> 結尾），不完整就縮小這次要修改的範圍再問一次。",
