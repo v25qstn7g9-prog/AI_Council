@@ -629,6 +629,17 @@ ${b}
       "⚠️ 有檔案內容疑似因為回覆長度上限被截斷，下載後請比對檔案結尾是否完整（例如 index.html 應該以 </html> 結尾），不完整就縮小這次要修改的範圍再問一次。",
     ];
   }
+  // AI 有時候會只用文字「聲稱」已經改好檔案，卻沒有真的輸出任何 FILE 區塊或
+  // JSON files 欄位——這種情況 files 會是空陣列，使用者會看不到下載按鈕、
+  // 也搞不清楚發生什麼事。這裡把原始回覆的前一段內容存起來，讓前端可以顯示
+  // 出來，方便回報問題時直接截圖給人看，而不用用猜的。
+  if (artifact && !files.length) {
+    artifact.instructions = [
+      ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
+      "⚠️ 這次 AI 沒有輸出任何檔案內容（可能只用文字描述已經改好，但沒有真的產生檔案），所以沒有下載按鈕。可以換句話說「請務必用 =====FILE===== 格式完整輸出 index.html」再問一次試試。",
+    ];
+    artifact.debugRawPreview = String(finalRaw || "").slice(0, 1500);
+  }
   const finalText = artifact
     ? [artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
     : finalRaw;
