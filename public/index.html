@@ -95,13 +95,13 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 </div>
 
 <footer>
-<div class="composer">
+<form id="composerForm" class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.8.1 · 可插拔 AI</span>
-<div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
+<span id="status" class="badge">v3.10.1 · 檔案輸出修正版</span>
+<div><button id="clear" type="button" class="secondary">清除結果</button> <button id="send" type="submit">工程會議</button></div>
 </div>
-</div>
+</form>
 </footer>
 
 <script>
@@ -401,23 +401,37 @@ async function run(){
     addCard("a",d.labels?.a||"主工程師 A",d.a);
     addCard("b",d.labels?.b||"Reviewer B",d.b);
     if(d.artifact)renderArtifact(d.artifact);
-    else addCard("judge","最終整合",d.final||"已完成");
+    else renderArtifact({summary:d.final||"已完成",files:[],instructions:["⚠️ 這次沒有收到可下載的 AI 修正版檔案；下面提供目前上傳專案 ZIP。"]});
     status.textContent=`完成 · ${d.version}`;
   }catch(e){
     addCard("err","工程會議失敗",e.message);status.textContent="失敗";
   }finally{send.disabled=false;q.focus()}
 }
+const composerForm=$("#composerForm");
 let sendGestureHandled=false;
 function triggerSendFromTouch(e){
   if(send.disabled)return;
+  if(e?.cancelable)e.preventDefault();
   sendGestureHandled=true;
-  if(e.cancelable)e.preventDefault();
   run();
-  setTimeout(()=>{sendGestureHandled=false},500);
+  setTimeout(()=>{sendGestureHandled=false},700);
 }
-send.addEventListener("touchstart",triggerSendFromTouch,{passive:false});
-send.addEventListener("pointerdown",e=>{
-  if(e.pointerType!=="mouse")triggerSendFromTouch(e);
+// iOS/PWA：用 form submit 作為主路徑；touch/pointer 只作為第一時間觸發的保險。
+composerForm.addEventListener("submit",e=>{
+  e.preventDefault();
+  if(sendGestureHandled)return;
+  run();
+});
+send.addEventListener("touchend",e=>{
+  if(send.disabled)return;
+  if(e.cancelable)e.preventDefault();
+  if(!sendGestureHandled)triggerSendFromTouch(e);
+},{passive:false});
+send.addEventListener("pointerup",e=>{
+  if(e.pointerType!=="mouse" && !sendGestureHandled){
+    if(e.cancelable)e.preventDefault();
+    triggerSendFromTouch(e);
+  }
 });
 send.addEventListener("click",e=>{
   if(sendGestureHandled){e.preventDefault();return;}
