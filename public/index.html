@@ -350,6 +350,7 @@ async function run(){
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
+  q.blur(); // 送出後立刻收起鍵盤，讓使用者能看到後面的進度／結果，不會被鍵盤擋住
   addCard("me","你",question);
 
   let isChat=chatModeEl.checked;
@@ -374,7 +375,7 @@ async function run(){
       status.textContent=`完成 · ${d.version}`;
     }catch(e){
       addCard("err","聊天失敗",e.message);status.textContent="失敗";
-    }finally{send.disabled=false;q.focus()}
+    }finally{send.disabled=false}
     return;
   }
 
@@ -399,7 +400,7 @@ async function run(){
     status.textContent=`完成 · ${d.version}`;
   }catch(e){
     addCard("err","工程會議失敗",e.message);status.textContent="失敗";
-  }finally{send.disabled=false;q.focus()}
+  }finally{send.disabled=false}
 }
 const composerForm=$("#composerForm");
 let sendGestureHandled=false;
