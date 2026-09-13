@@ -25,7 +25,8 @@ const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
 const MAX_REVIEW_FILE_CHARS = 22000;
-const FINAL_MAX_TOKENS = 16000;
+const FINAL_MAX_TOKENS = 24000; // 原本 16000；主要解法是把檔案內容改用純文字分隔符傳輸
+                                 // （不再塞進 JSON 字串），這裡只是順手加一點緩衝，不是主要修復。
 const DEFAULT_RATE_LIMIT = "8:1800";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
@@ -375,6 +376,26 @@ function extractJson(text) {
   return null;
 }
 
+// 從最終整合回覆裡撈出 "=====FILE:path=====...=====ENDFILE====="區塊，純文字比對，
+// 不需要 JSON.parse，所以檔案內容裡本來就有的引號、換行、大括號都不用跳脫。
+// 結尾 "=====ENDFILE====="這行如果因為長度上限被截斷而沒出現，用 (?:\n?=====ENDFILE=====|$)
+// 讓它退而求其次抓到字串結尾——這樣至少能救回被砍斷前已經生成的那部分內容，
+// 而不是讓整包回覆因為少一個結尾符號就整段作廢。
+function extractFileBlocks(text) {
+  const s = String(text || "");
+  const re = /=====\s*FILE\s*:\s*([^\n=]+?)\s*=====\r?\n([\s\S]*?)(\r?\n=====\s*ENDFILE\s*=====|$)/gi;
+  const files = [];
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const path = m[1].trim();
+    const content = m[2];
+    const closedProperly = Boolean(m[3]); // 空字串代表退而求其次比對到字串結尾，代表被截斷了
+    if (path) files.push({ path, content, truncated: !closedProperly });
+    if (re.lastIndex <= m.index) re.lastIndex = m.index + 1; // 保險：避免零寬比對造成無窮迴圈
+  }
+  return { files, truncated: files.some((f) => f.truncated) };
+}
+
 async function checkRateLimit(env, ip) {
   const raw = String(env.COUNCIL_RATE_LIMIT || DEFAULT_RATE_LIMIT);
   const [maxStr, windowStr] = raw.split(":");
@@ -494,7 +515,10 @@ ${b}
 
 請整合成可執行結果。若你有把握修改上傳的文字檔，請輸出「完整檔案內容」，不要只給 diff。
 
-你的回覆必須是單一 JSON，不能有 markdown code fence，格式：
+你的回覆分兩段，順序固定：
+
+【第一段：JSON 說明區塊】
+用 \`\`\`json 和 \`\`\` 包起來（一定要用這個 code fence，方便系統切出這段），格式：
 {
   "summary": "簡短結論",
   "rootCause": "根因；若不確定要寫不確定",
@@ -503,16 +527,18 @@ ${b}
   "pending": ["仍需驗證的事項；若沒有就空陣列"],
   "sources": ["來源名稱或 URL；若本題未用 Web Search 可空陣列"],
   "review": ["核對重點1","核對重點2"],
-  "instructions": ["使用者接下來要做的事"],
-  "files": [
-    {"path":"必須與上傳檔案 path 相同，或是合理的新檔路徑","content":"完整檔案內容"}
-  ]
+  "instructions": ["使用者接下來要做的事"]
 }
+這個 JSON 「不要」包含 files 欄位——檔案內容改放第二段，用純文字傳，不要 JSON 跳脫（這樣才不會因為引號、換行跳脫把回覆撐爆、超過長度上限被截斷）。
+
+【第二段：檔案內容區塊】
+每個要修改或新增的檔案，各自用這個格式包起來，path 換成實際路徑：
+=====FILE:path/to/file=====
+（這裡放完整檔案內容，原始文字，不要加引號跳脫，不要用 markdown code fence 包住）
+=====ENDFILE=====
 
 規則：
-- 只修改必要檔案。
-- 不確定的檔案不要生成。
-- files 可為空陣列。
+- 只修改必要檔案；不確定的檔案不要生成；沒有要改的檔案就完全不要輸出 FILE 區塊。
 - 不得省略檔案內容或用「其餘不變」。
 - 不能把圖片當文字檔輸出。
 - 不要把 API Key / Secret 寫入檔案。
@@ -520,15 +546,29 @@ ${b}
 - sources 只列實際出現在搜尋資料裡的來源，不得捏造 URL。
 - 外部資訊若沒有來源直接支持，就只能放 inferences 或 pending，不能放 verified。
 - 「建議下一步查詢」不能被寫成已發生事實。
-- 最終摘要要優先呈現已證實因素；推測與待驗證放後面。`;
+- 最終摘要要優先呈現已證實因素；推測與待驗證放後面。
+- 檔案內容一定要放在 JSON 區塊「之後」，兩段不要交錯。`;
 
   const finalResult = await askA(env.AI, env, [
-    { role:"system", content:"你是軟體專案最終整合工程師。嚴格輸出有效 JSON。" },
+    { role:"system", content:"你是軟體專案最終整合工程師。第一段輸出 fenced JSON 說明，第二段用 FILE 分隔符輸出檔案內容，不要把檔案內容塞進 JSON 字串裡。" },
     { role:"user", content:finalPrompt },
   ], FINAL_MAX_TOKENS, 0.15);
   const finalRaw = finalResult.text;
 
-  const artifact = extractJson(finalRaw);
+  // JSON 說明（summary/rootCause/...）跟檔案內容是分開解析的：檔案內容用純文字
+  // 分隔符傳輸，不受 JSON 跳脫/截斷影響，就算長度上限被打斷，也只會少幾行程式碼，
+  // 不會讓整包回覆（連帶已經完整生成的說明文字）一起變成無法解析的廢文字。
+  const metaJson = extractJson(finalRaw);
+  const { files: parsedFiles, truncated: filesTruncated } = extractFileBlocks(finalRaw);
+  const artifact = metaJson || parsedFiles.length
+    ? { ...(metaJson || {}), files: parsedFiles }
+    : null;
+  if (artifact && filesTruncated) {
+    artifact.instructions = [
+      ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
+      "⚠️ 有檔案內容疑似因為回覆長度上限被截斷，下載後請比對檔案結尾是否完整（例如 index.html 應該以 </html> 結尾），不完整就縮小這次要修改的範圍再問一次。",
+    ];
+  }
   const finalText = artifact
     ? [artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
     : finalRaw;
