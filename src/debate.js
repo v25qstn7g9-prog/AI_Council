@@ -656,11 +656,18 @@ ${b}
     ];
     artifact.debugRawPreview = String(finalRaw || "").slice(0, 1500);
   }
-  // 若最終模型只做了審查、沒有輸出 FILE 區塊，改用「逐檔輸出救援」。
-  // 不再一次要求 AI 同時重寫整個專案；每次只給一個原始檔，讓模型完整重建該檔案，
-  // 大幅降低輸出過長、被截斷、只寫說明不寫檔案的機率。
-  if (!outputFiles.length && Array.isArray(rawFiles) && rawFiles.length > 0) {
-    const rescueFiles = normalizeFiles(rawFiles).filter(f => f.path && typeof f.content === "string");
+  // 逐檔救援：以前只有在 AI 完全交白卷（0 個檔案）時才會觸發，這次改成
+  // 「只要有截斷跡象，就針對還沒拿到完整內容的檔案個別補救」——不再要求 AI
+  // 一次把全部檔案塞進同一次回覆（上傳檔案一多，這個共用長度上限一定會爆），
+  // 改成缺哪個就單獨補那個，每個檔案各自有自己的長度預算，不會互相排擠。
+  const hadTruncationSignal = filesTruncated || outputFiles.some((f) => f.truncated);
+  if ((!outputFiles.length || hadTruncationSignal) && Array.isArray(rawFiles) && rawFiles.length > 0) {
+    // 已經完整拿到（沒被標記截斷、內容非空）的檔案不用再救，只補還缺的／被砍斷的那幾個。
+    const completePaths = new Set(
+      outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => f.path)
+    );
+    const rescueFiles = normalizeFiles(rawFiles)
+      .filter((f) => f.path && typeof f.content === "string" && !completePaths.has(f.path));
     const rescueOut = [];
     const rescueErrors = [];
 
@@ -713,11 +720,15 @@ ${target.content}
     }
 
     if (rescueOut.length) {
-      outputFiles = rescueOut;
+      // 合併，不是取代：原本就完整、沒被截斷的檔案繼續保留，只把這次救援
+      // 補齊的檔案加進去（同路徑的話用救援結果蓋掉，因為那個才是完整版）。
+      const merged = new Map(outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => [f.path, f]));
+      for (const f of rescueOut) merged.set(f.path, f);
+      outputFiles = [...merged.values()];
       if (artifact) {
         artifact.files = outputFiles;
         artifact.instructions = (Array.isArray(artifact.instructions) ? artifact.instructions : [])
-          .filter(x => !String(x).includes("這次 AI 沒有輸出任何檔案內容"));
+          .filter(x => !String(x).includes("這次 AI 沒有輸出任何檔案內容") && !String(x).includes("疑似因為回覆長度上限被截斷"));
         delete artifact.debugRawPreview;
       } else {
         artifact = { files: outputFiles };
