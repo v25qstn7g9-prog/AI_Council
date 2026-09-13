@@ -345,12 +345,22 @@ function shouldExitChatMode(text){
   return CHAT_EXIT_KEYWORDS.some(k=>text.includes(k));
 }
 
+// iOS Safari 有個滿有名的老問題：單純呼叫 element.blur() 常常不會真的把
+// 螢幕鍵盤收起來（跟輸入框失去焦點是兩件事，iOS 有時候就是不理）。比較可靠
+// 的做法是暫時把輸入框設成唯讀，逼 iOS 認定這格「現在不能打字」而把鍵盤收
+// 起來，等收起來之後再把唯讀拿掉，下次還是能正常打字。
+function forceDismissKeyboard(){
+  q.setAttribute("readonly","readonly");
+  q.blur();
+  setTimeout(()=>{ q.removeAttribute("readonly"); },100);
+}
+
 async function run(){
   const question=q.value.trim();
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
-  q.blur(); // 送出後立刻收起鍵盤，讓使用者能看到後面的進度／結果，不會被鍵盤擋住
+  forceDismissKeyboard(); // 送出後立刻收起鍵盤，讓使用者能看到後面的進度／結果，不會被鍵盤擋住
   addCard("me","你",question);
 
   let isChat=chatModeEl.checked;
