@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "3.10.0-auto-web-search";
+const VERSION = "3.10.1-file-output-reliable";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -24,7 +24,7 @@ const MAX_FILE_CHARS = 30000;
 const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
-const MAX_REVIEW_FILE_CHARS = 22000;
+const MAX_REVIEW_FILE_CHARS = 30000;
 const FINAL_MAX_TOKENS = 24000; // 原本 16000；主要解法是把檔案內容改用純文字分隔符傳輸
                                  // （不再塞進 JSON 字串），這裡只是順手加一點緩衝，不是主要修復。
 const DEFAULT_RATE_LIMIT = "8:1800";
@@ -651,59 +651,88 @@ ${b}
     ];
     artifact.debugRawPreview = String(finalRaw || "").slice(0, 1500);
   }
-  // 若最終模型只做了審查、沒有輸出 FILE 區塊，再做一次「檔案輸出專用」救援。
-  // 這次只要求完整檔案，不再要求長篇說明，降低因說明文字吃掉 token 而沒有檔案的機率。
-  if (!files.length && files.length === 0 && Array.isArray(rawFiles) && rawFiles.length > 0) {
-    const retryContext = buildProjectContext(normalizeFiles(rawFiles), imageReports).text;
-    const retryPrompt = `使用者要修復這個專案：
+  // 若最終模型只做了審查、沒有輸出 FILE 區塊，改用「逐檔輸出救援」。
+  // 不再一次要求 AI 同時重寫整個專案；每次只給一個原始檔，讓模型完整重建該檔案，
+  // 大幅降低輸出過長、被截斷、只寫說明不寫檔案的機率。
+  if (!files.length && Array.isArray(rawFiles) && rawFiles.length > 0) {
+    const rescueFiles = normalizeFiles(rawFiles).filter(f => f.path && typeof f.content === "string");
+    const rescueOut = [];
+    const rescueErrors = [];
+
+    for (const target of rescueFiles) {
+      const rescuePrompt = `你現在是「實際修檔工程師」。
+
+使用者原始任務：
 ${q}
 
-【原始專案檔案】
-${retryContext}
-
-【主工程師 A】
+主工程師 A 的分析：
 ${a}
 
-【Reviewer B】
+Reviewer B 的分析：
 ${b}
 
-【第一次最終整合回覆】
-${String(finalRaw || "").slice(0, 8000)}
+你要處理的唯一檔案：${target.path}
 
-現在不要寫報告。只做「實際修檔」。
-如果問題可以從上面的完整檔案直接修正，請輸出每個需要修改的完整檔案，嚴格使用：
-=====FILE:path/to/file=====
-完整原始檔案內容（已修正）
+以下是這個檔案的完整原始內容：
+=====ORIGINAL_FILE:${target.path}=====
+${target.content}
+=====END_ORIGINAL_FILE=====
+
+規則：
+1. 如果這個檔案確實需要修改，直接修正它。
+2. 如果這個檔案不需要修改，也必須原樣完整輸出它，不准只回答「不用改」。
+3. 絕對不要只寫說明、不要提供下載連結、不要說「我已經打包 ZIP」。
+4. 必須輸出完整檔案內容，不能省略、不能寫「其餘不變」。
+5. 不要使用 markdown code fence 包住檔案。
+6. 唯一輸出格式：
+=====FILE:${target.path}=====
+完整檔案內容
 =====ENDFILE=====
-不要使用 JSON 的 files 欄位，不要使用 markdown code fence，不要省略內容，不要寫「其餘不變」。
-如果真的無法安全修改，才輸出一句「無法安全修正：...」。`;
-    try {
-      const retryResult = await askA(env.AI, env, [
-        { role:"system", content:"你是最後的程式修復器。只要提供的檔案足夠，就必須輸出完整修正版檔案，不要只評論。" },
-        { role:"user", content:retryPrompt },
-      ], Math.min(FINAL_MAX_TOKENS, 18000), 0.05);
-      const retryRaw = retryResult.text;
-      const retryParsed = extractFileBlocks(retryRaw);
-      if (retryParsed.files.length) {
-        files = retryParsed.files;
-        if (artifact) {
-          artifact.files = files;
-          if (Array.isArray(artifact.instructions)) {
-            artifact.instructions = artifact.instructions.filter(x => !String(x).includes("這次 AI 沒有輸出任何檔案內容"));
-          }
-          delete artifact.debugRawPreview;
-        } else artifact = { files };
-        if (retryParsed.truncated) {
-          artifact.instructions = [
-            ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
-            "⚠️ 救援輸出中的檔案疑似被截斷，下載後請檢查檔案結尾。",
-          ];
+7. 不要輸出其他文字。`;
+
+      try {
+        const rr = await askA(env.AI, env, [
+          { role:"system", content:"你是嚴格的程式檔案修復器。你的唯一工作是輸出指定檔案的完整內容。絕對不能只評論，也不能產生虛構下載連結。" },
+          { role:"user", content:rescuePrompt },
+        ], 18000, 0.05);
+        const parsed = extractFileBlocks(rr.text);
+        const hit = parsed.files.find(f => f.path === target.path) || parsed.files[0];
+        if (hit && typeof hit.content === "string" && hit.content.length > 0) {
+          rescueOut.push({ ...hit, path: target.path, truncated: Boolean(hit.truncated) });
+        } else {
+          rescueErrors.push(`${target.path}：AI 沒有輸出完整 FILE 區塊`);
         }
+      } catch (e) {
+        rescueErrors.push(`${target.path}：${String(e?.message || e || "未知錯誤")}`);
       }
-    } catch (retryError) {
-      if (artifact) artifact.instructions = [
+    }
+
+    if (rescueOut.length) {
+      files = rescueOut;
+      if (artifact) {
+        artifact.files = files;
+        artifact.instructions = (Array.isArray(artifact.instructions) ? artifact.instructions : [])
+          .filter(x => !String(x).includes("這次 AI 沒有輸出任何檔案內容"));
+        delete artifact.debugRawPreview;
+      } else {
+        artifact = { files };
+      }
+      if (rescueErrors.length) {
+        artifact.instructions = [
+          ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
+          `⚠️ 部分檔案救援失敗：${rescueErrors.join("；")}`,
+        ];
+      }
+      if (files.some(f => f.truncated)) {
+        artifact.instructions = [
+          ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
+          "⚠️ 救援輸出的檔案疑似被截斷，下載後請檢查檔案結尾。",
+        ];
+      }
+    } else if (artifact) {
+      artifact.instructions = [
         ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
-        `⚠️ 檔案輸出救援失敗：${String(retryError?.message || retryError || "")}`,
+        `⚠️ 逐檔修復仍未取得完整檔案：${rescueErrors.join("；")}`,
       ];
     }
   }
