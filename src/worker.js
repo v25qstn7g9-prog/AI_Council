@@ -1,23 +1,5 @@
 /**
  * worker.js — AI 圓桌的進入點程式（Workers with Static Assets 架構）
- *
- * 路由規則：
- * - /debate（POST）      → 交給 src/debate.js 跑圓桌
- * - /usage（GET）        → 查詢 Workers AI 今日 Neurons 用量
- * - /self-review（POST） → 手動觸發一次自我健檢（需要 SELF_REVIEW_TOKEN，見下方）
- * - 其他所有網址          → 當一般靜態檔案送出去
- *
- * 自我健檢（scheduled + /self-review）：
- * - 每次執行都是「讀自己的原始碼 → 跑一次工程圓桌審查 → 有修改建議就開 PR，沒有就開 Issue
- *   留一份健檢報告」。永遠不會自動 merge PR，最後按下去部署的人一定是你自己。
- * - 排程頻率設在 wrangler.jsonc 的 triggers.crons。
- * - 手動觸發是為了不想等排程時使用；因為會消耗 AI 額度、還會在你的 GitHub repo 開 PR/Issue，
- *   所以刻意沒有做成公開頁面上的按鈕，必須帶對 SELF_REVIEW_TOKEN 這個 Secret 才能觸發。
- *   支援 GET 也支援 POST，方便直接在手機瀏覽器網址列貼上以下網址就能觸發（不需要終端機）：
- *     https://你的-worker.workers.dev/self-review?token=你設定的token
- *   或用指令（有終端機的話）：
- *     curl -X POST "https://你的-worker.workers.dev/self-review" -H "x-self-review-token: 你設定的token"
- *   沒有設定 SELF_REVIEW_TOKEN 的話，這個手動端點會直接拒絕，只有排程還能跑。
  */
 import { onRequestPost as debateHandler } from "./debate.js";
 import { onRequestGet as usageHandler } from "./usage.js";
@@ -38,13 +20,26 @@ async function readSecret(env, name) {
   return String(value || "").trim();
 }
 
+/**
+ * 防範時序攻擊 (Timing Attacks) 的常數時間比對函數
+ */
+async function safeCompare(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const encoder = new TextEncoder();
+  const aBuf = encoder.encode(a);
+  const bBuf = encoder.encode(b);
+  if (aBuf.byteLength !== bBuf.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(aBuf, bBuf);
+}
+
 async function handleSelfReviewRequest(request, env) {
   const configuredToken = await readSecret(env, "SELF_REVIEW_TOKEN");
   if (!configuredToken) {
     return json({ ok: false, error: "尚未設定 SELF_REVIEW_TOKEN，手動觸發已停用（排程仍會照常執行）" }, 403);
   }
   const givenToken = request.headers.get("x-self-review-token") || new URL(request.url).searchParams.get("token") || "";
-  if (givenToken !== configuredToken) {
+  const isValid = await safeCompare(givenToken, configuredToken);
+  if (!isValid) {
     return json({ ok: false, error: "token 不正確" }, 401);
   }
   try {
@@ -74,8 +69,6 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  // Cron Trigger 進入點：排程時間到了由 Cloudflare 自動呼叫，不是使用者觸發的。
-  // 用 ctx.waitUntil 讓 Worker 在背景把整個健檢流程跑完，而不是被提早關閉。
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       runSelfReview(env).catch((e) => {

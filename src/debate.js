@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.10.0-auto-web-search
+ * debate.js — ai-council-v3.10.1-optimized
  *
  * POST /debate
  * body:
@@ -25,8 +25,7 @@ const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
 const MAX_REVIEW_FILE_CHARS = 30000;
-const FINAL_MAX_TOKENS = 24000; // 原本 16000；主要解法是把檔案內容改用純文字分隔符傳輸
-                                 // （不再塞進 JSON 字串），這裡只是順手加一點緩衝，不是主要修復。
+const FINAL_MAX_TOKENS = 24000;
 const DEFAULT_RATE_LIMIT = "8:1800";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
@@ -86,7 +85,9 @@ async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 
       ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
-  if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+  if (systemMsg && systemMsg.content.trim()) {
+    body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+  }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
   const r = await fetch(url, {
@@ -189,8 +190,7 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
 async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
   const provider = normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare");
   try {
-    const result = await askProvider(ai, env, provider, messages, maxTokens, temperature, "A");
-    return result;
+    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "A");
   } catch (e) {
     if (provider === "cloudflare") {
       const key = await getSecret(env, "GEMINI_API_KEY");
@@ -376,11 +376,6 @@ function extractJson(text) {
   return null;
 }
 
-// 從最終整合回覆裡撈出 "=====FILE:path=====...=====ENDFILE====="區塊，純文字比對，
-// 不需要 JSON.parse，所以檔案內容裡本來就有的引號、換行、大括號都不用跳脫。
-// 結尾 "=====ENDFILE====="這行如果因為長度上限被截斷而沒出現，用 (?:\n?=====ENDFILE=====|$)
-// 讓它退而求其次抓到字串結尾——這樣至少能救回被砍斷前已經生成的那部分內容，
-// 而不是讓整包回覆因為少一個結尾符號就整段作廢。
 function extractFileBlocks(text) {
   const s = String(text || "");
   const re = /=====\s*FILE\s*:\s*([^\n=]+?)\s*=====\r?\n([\s\S]*?)(\r?\n=====\s*ENDFILE\s*=====|$)/gi;
@@ -389,17 +384,13 @@ function extractFileBlocks(text) {
   while ((m = re.exec(s)) !== null) {
     const path = m[1].trim();
     const content = m[2];
-    const closedProperly = Boolean(m[3]); // 空字串代表退而求其次比對到字串結尾，代表被截斷了
+    const closedProperly = Boolean(m[3]);
     if (path) files.push({ path, content, truncated: !closedProperly });
-    if (re.lastIndex <= m.index) re.lastIndex = m.index + 1; // 保險：避免零寬比對造成無窮迴圈
+    if (re.lastIndex <= m.index) re.lastIndex = m.index + 1;
   }
   return { files, truncated: files.some((f) => f.truncated) };
 }
 
-// 救援用：模型如果沒照新格式寫、還是把檔案內容包進 JSON 的舊寫法
-// （"files":[{"path":...,"content":...}]），這裡不依賴整份 JSON 能不能完整解析——
-// 只要某一個 {"path":...,"content":...} 物件本身有頭有尾、沒被截斷，
-// 就用 regex 把它單獨撈出來，跟同一份回覆裡其他地方是否被截斷無關。
 function extractLegacyEmbeddedFiles(text) {
   const s = String(text || "");
   const re = /\{\s*"path"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
@@ -440,10 +431,10 @@ export async function runEngineeringCouncil({ env, question, rawFiles, rawImages
     ? await searchWeb(env, q)
     : { ok:true, used:false, reason:"disabled_by_user", message:"Web Search 已關閉", text:"", resultCount:0 };
 
-  const imageReports = [];
-  for (const image of images) {
-    imageReports.push(await analyzeImage(env.AI, image));
-  }
+  // 優化：並列進行多張圖片視覺分析 (Promise.all)
+  const imageReports = await Promise.all(
+    images.map(image => analyzeImage(env.AI, image))
+  );
 
   const projectContext = buildProjectContext(files, imageReports).text;
   const searchNote = search.used && search.text
@@ -593,22 +584,12 @@ ${b}
   ], FINAL_MAX_TOKENS, 0.15);
   const finalRaw = finalResult.text;
 
-  // JSON 說明（summary/rootCause/...）跟檔案內容是分開解析的：檔案內容用純文字
-  // 分隔符傳輸，不受 JSON 跳脫/截斷影響，就算長度上限被打斷，也只會少幾行程式碼，
-  // 不會讓整包回覆（連帶已經完整生成的說明文字）一起變成無法解析的廢文字。
-  // 這裡刻意叫 outputFiles（不是 files）——外層已經有一個 const files 是「使用者
-  // 上傳的原始檔案清單」，這裡指的是「AI 這次輸出的修改後檔案」，是不同的東西，
-  // 撞名會導致變數重複宣告的編譯錯誤。
   const metaJson = extractJson(finalRaw);
   const { files: newFormatFiles, truncated: filesTruncated } = extractFileBlocks(finalRaw);
 
   let outputFiles = newFormatFiles;
   let usedLegacyRecovery = false;
   if (!outputFiles.length) {
-    // 模型沒照新格式寫（還是習慣把檔案塞進 JSON 的 "files" 欄位），這裡退回救援：
-    // 先看 metaJson.files 能不能直接讀到；如果外層 JSON 整個因為截斷而解析失敗
-    // （metaJson 是 null），再用寬鬆的 regex 逐個撈出「本身完整收尾」的檔案物件——
-    // 就算同一份回覆裡其他地方被截斷，只要某個檔案自己有頭有尾，還是救得回來。
     const fromMeta = Array.isArray(metaJson?.files)
       ? metaJson.files.filter((f) => f?.path && typeof f.content === "string")
       : [];
@@ -622,13 +603,6 @@ ${b}
     usedLegacyRecovery = outputFiles.length > 0;
   }
 
-  // metaJson 跟 outputFiles 可能「兩個都是空的」——AI 這次乾脆整段用純文字回答，
-  // 完全沒有照規格輸出 JSON 或 FILE 區塊。這種情況以前會讓 artifact 變成
-  // null，直接跳過下面所有除錯機制，前端退回顯示原始文字、使用者完全看不出
-  // 發生什麼事。這裡改成「不管多失敗，都至少生出一個 artifact 物件」，讓
-  // 除錯資訊一定會被夾帶回去，不會因為連 JSON 外殼都沒有就整組放棄。
-  // 用 let 宣告是因為下面「逐檔輸出救援」成功時，可能需要在 artifact 原本是
-  // null 的情況下重新賦值一個新物件給它。
   let artifact = metaJson || outputFiles.length || finalRaw
     ? { ...(metaJson || {}), files: outputFiles }
     : null;
@@ -639,15 +613,8 @@ ${b}
       "⚠️ 有檔案內容疑似因為回覆長度上限被截斷，下載後請比對檔案結尾是否完整（例如 index.html 應該以 </html> 結尾），不完整就縮小這次要修改的範圍再問一次。",
     ];
   }
-  // AI 有時候會只用文字「聲稱」已經改好檔案，卻沒有真的輸出任何 FILE 區塊或
-  // JSON files 欄位（甚至連 JSON 說明本身都沒有、整段純文字回答）——這種情況
-  // outputFiles 會是空陣列，使用者會看不到下載按鈕、也搞不清楚發生什麼事。這裡把
-  // 原始回覆的前一段內容存起來，讓前端可以顯示出來，方便回報問題時直接截圖
-  // 給人看，而不用用猜的。
   if (artifact && !outputFiles.length) {
     if (!metaJson) {
-      // 連 JSON 說明外殼都沒有——AI 這次整段都是純文字，summary 用不到，
-      // 直接把它當成整段說明顯示，並附上除錯預覽。
       artifact.summary = artifact.summary || "AI 這次沒有照規格輸出 JSON，以下是原始回覆內容（除錯用）：";
     }
     artifact.instructions = [
@@ -656,13 +623,9 @@ ${b}
     ];
     artifact.debugRawPreview = String(finalRaw || "").slice(0, 1500);
   }
-  // 逐檔救援：以前只有在 AI 完全交白卷（0 個檔案）時才會觸發，這次改成
-  // 「只要有截斷跡象，就針對還沒拿到完整內容的檔案個別補救」——不再要求 AI
-  // 一次把全部檔案塞進同一次回覆（上傳檔案一多，這個共用長度上限一定會爆），
-  // 改成缺哪個就單獨補那個，每個檔案各自有自己的長度預算，不會互相排擠。
+
   const hadTruncationSignal = filesTruncated || outputFiles.some((f) => f.truncated);
   if ((!outputFiles.length || hadTruncationSignal) && Array.isArray(rawFiles) && rawFiles.length > 0) {
-    // 已經完整拿到（沒被標記截斷、內容非空）的檔案不用再救，只補還缺的／被砍斷的那幾個。
     const completePaths = new Set(
       outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => f.path)
     );
@@ -720,8 +683,6 @@ ${target.content}
     }
 
     if (rescueOut.length) {
-      // 合併，不是取代：原本就完整、沒被截斷的檔案繼續保留，只把這次救援
-      // 補齊的檔案加進去（同路徑的話用救援結果蓋掉，因為那個才是完整版）。
       const merged = new Map(outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => [f.path, f]));
       for (const f of rescueOut) merged.set(f.path, f);
       outputFiles = [...merged.values()];

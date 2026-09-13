@@ -1,19 +1,9 @@
 /**
  * selfReview.js — AI 圓桌自我健檢
- *
- * 讓 A（主工程師）/ B（Reviewer）/ 最終整合，定期（或手動）審查「AI 圓桌自己的原始碼」，
- * 把發現的問題跟建議修改，包成一個 GitHub Pull Request 送出去。
- *
- * 設計原則（刻意，不是漏做）：
- * - 永遠不會自動 merge。PR／Issue 開好就停在那裡，等人看過、按下去才會真的生效。
- * - 找不到需要修改的地方時，改開一張 Issue 留下健檢報告，而不是硬找東西改。
- * - 只審查白名單裡列出的固定檔案，不會自己去抓專案以外、或它猜測存在的檔案。
  */
 
 import { runEngineeringCouncil } from "./debate.js";
 
-// 只審查這些固定路徑，不讓 AI 自己決定要看哪些檔案 —— 白名單本身就是一種防護，
-// 避免它因為理解錯誤而去動到不該碰的東西（例如不存在的檔案、或它自己編出來的路徑）。
 const SELF_REVIEW_FILES = [
   "src/worker.js",
   "src/debate.js",
@@ -78,7 +68,6 @@ async function fetchRepoFile(env, path, ref) {
     if (!data?.content) return null;
     return base64ToUtf8(data.content);
   } catch {
-    // 檔案在這個 repo 裡不存在，或讀取失敗，略過就好，不當成致命錯誤。
     return null;
   }
 }
@@ -89,14 +78,16 @@ async function openSelfReviewPR(env, { branch, base, files, title, body }) {
   const baseCommit = await githubRequest(env, `/git/commits/${baseSha}`);
   const baseTreeSha = baseCommit.tree.sha;
 
-  const treeItems = [];
-  for (const f of files) {
-    const blob = await githubRequest(env, `/git/blobs`, {
-      method: "POST",
-      body: JSON.stringify({ content: f.content, encoding: "utf-8" }),
-    });
-    treeItems.push({ path: f.path, mode: "100644", type: "blob", sha: blob.sha });
-  }
+  // 優化：並行處理 GitHub Blobs 上傳
+  const treeItems = await Promise.all(
+    files.map(async (f) => {
+      const blob = await githubRequest(env, `/git/blobs`, {
+        method: "POST",
+        body: JSON.stringify({ content: f.content, encoding: "utf-8" }),
+      });
+      return { path: f.path, mode: "100644", type: "blob", sha: blob.sha };
+    })
+  );
 
   const newTree = await githubRequest(env, `/git/trees`, {
     method: "POST",
@@ -113,7 +104,6 @@ async function openSelfReviewPR(env, { branch, base, files, title, body }) {
     body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: newCommit.sha }),
   });
 
-  // 只開 PR，絕對不呼叫 merge API —— 這是整個功能最重要的一條界線。
   return githubRequest(env, `/pulls`, {
     method: "POST",
     body: JSON.stringify({ title, head: branch, base, body }),
