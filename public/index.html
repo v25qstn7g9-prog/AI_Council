@@ -251,6 +251,12 @@ function renderArtifact(artifact){
     }
     c.append(actions);
   }
+  if(typeof artifact.debugRawPreview==="string"&&artifact.debugRawPreview){
+    const pre=document.createElement("pre");
+    pre.style.cssText="margin-top:8px;padding:8px;background:#0b0d12;border:1px solid var(--line);border-radius:8px;font-size:10px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;color:#9da6b8";
+    pre.textContent="除錯用：AI 這次的原始回覆（前 1500 字）\n\n"+artifact.debugRawPreview;
+    c.append(pre);
+  }
 }
 async function downloadPatchedZip(artifact){
   if(typeof JSZip==="undefined")return alert("JSZip 尚未載入");
