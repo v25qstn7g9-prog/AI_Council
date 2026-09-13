@@ -350,9 +350,18 @@ function shouldExitChatMode(text){
 // 的做法是暫時把輸入框設成唯讀，逼 iOS 認定這格「現在不能打字」而把鍵盤收
 // 起來，等收起來之後再把唯讀拿掉，下次還是能正常打字。
 function forceDismissKeyboard(){
+  // iOS/PWA：按「工程會議」後，先讓輸入框失焦，再用短暫 readonly
+  // 阻止鍵盤重新被帶回來。不要依賴 pointerdown 的 preventDefault，
+  // 否則 iOS 可能把「輸入框失焦」這個原生動作一起取消。
+  try{ q.blur(); }catch(_){}
+  try{ document.activeElement?.blur?.(); }catch(_){}
   q.setAttribute("readonly","readonly");
-  q.blur();
-  setTimeout(()=>{ q.removeAttribute("readonly"); },100);
+  try{ q.blur(); }catch(_){}
+  setTimeout(()=>{
+    try{ q.blur(); }catch(_){}
+    try{ document.activeElement?.blur?.(); }catch(_){}
+  },0);
+  setTimeout(()=>{ q.removeAttribute("readonly"); },450);
 }
 
 async function run(){
@@ -429,7 +438,12 @@ function triggerSendFromTouch(e){
 // 不會被硬收起，後面 touchend/click 還是照樣正常觸發 run()。
 send.addEventListener("pointerdown",e=>{
   if(send.disabled)return;
-  if(e.pointerType!=="mouse"&&e.cancelable)e.preventDefault();
+  // 不再 preventDefault：讓 iOS 自己完成 textarea 的原生失焦/收鍵盤。
+  // pointerdown 仍作為第一時間送出的保險；click/submit 會由
+  // sendGestureHandled 擋掉重複執行。
+  if(e.pointerType!=="mouse"){
+    triggerSendFromTouch(e);
+  }
 });
 // iOS/PWA：用 form submit 作為主路徑；touch/pointer 只作為第一時間觸發的保險。
 composerForm.addEventListener("submit",e=>{
