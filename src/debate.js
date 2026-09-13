@@ -619,7 +619,12 @@ ${b}
     usedLegacyRecovery = files.length > 0;
   }
 
-  const artifact = metaJson || files.length
+  // metaJson 跟 files 可能「兩個都是空的」——AI 這次乾脆整段用純文字回答，
+  // 完全沒有照規格輸出 JSON 或 FILE 區塊。這種情況以前會讓 artifact 變成
+  // null，直接跳過下面所有除錯機制，前端退回顯示原始文字、使用者完全看不出
+  // 發生什麼事。這裡改成「不管多失敗，都至少生出一個 artifact 物件」，讓
+  // 除錯資訊一定會被夾帶回去，不會因為連 JSON 外殼都沒有就整組放棄。
+  const artifact = metaJson || files.length || finalRaw
     ? { ...(metaJson || {}), files }
     : null;
   const treatAsTruncated = filesTruncated || (usedLegacyRecovery && !metaJson);
@@ -630,13 +635,19 @@ ${b}
     ];
   }
   // AI 有時候會只用文字「聲稱」已經改好檔案，卻沒有真的輸出任何 FILE 區塊或
-  // JSON files 欄位——這種情況 files 會是空陣列，使用者會看不到下載按鈕、
-  // 也搞不清楚發生什麼事。這裡把原始回覆的前一段內容存起來，讓前端可以顯示
-  // 出來，方便回報問題時直接截圖給人看，而不用用猜的。
+  // JSON files 欄位（甚至連 JSON 說明本身都沒有、整段純文字回答）——這種情況
+  // files 會是空陣列，使用者會看不到下載按鈕、也搞不清楚發生什麼事。這裡把
+  // 原始回覆的前一段內容存起來，讓前端可以顯示出來，方便回報問題時直接截圖
+  // 給人看，而不用用猜的。
   if (artifact && !files.length) {
+    if (!metaJson) {
+      // 連 JSON 說明外殼都沒有——AI 這次整段都是純文字，summary 用不到，
+      // 直接把它當成整段說明顯示，並附上除錯預覽。
+      artifact.summary = artifact.summary || "AI 這次沒有照規格輸出 JSON，以下是原始回覆內容（除錯用）：";
+    }
     artifact.instructions = [
       ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
-      "⚠️ 這次 AI 沒有輸出任何檔案內容（可能只用文字描述已經改好，但沒有真的產生檔案），所以沒有下載按鈕。可以換句話說「請務必用 =====FILE===== 格式完整輸出 index.html」再問一次試試。",
+      "⚠️ 這次 AI 沒有輸出任何檔案內容（可能只用文字描述已經改好，或整段純文字回答、沒有照規格輸出 JSON），所以沒有下載按鈕。可以換句話說「請務必用 =====FILE===== 格式完整輸出 index.html」再問一次試試。",
     ];
     artifact.debugRawPreview = String(finalRaw || "").slice(0, 1500);
   }
