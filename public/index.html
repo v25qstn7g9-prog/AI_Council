@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.8.1 · 工程協作</title>
+<title>AI 圓桌 v3.10.1 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -219,14 +219,18 @@ function buildPayloadFiles(){
   }
   return arr;
 }
+
+// 優化：前端多張圖片並行轉 Base64
 async function buildPayloadImages(){
-  const arr=[];
-  for(const x of workspace.values()){
-    if(x.kind!=="image")continue;
-    arr.push({name:x.path,dataUrl:await imageDataUrl(x.file)});
-  }
-  return arr;
+  const imageItems = [...workspace.values()].filter(x => x.kind === "image");
+  return Promise.all(
+    imageItems.map(async (x) => ({
+      name: x.path,
+      dataUrl: await imageDataUrl(x.file)
+    }))
+  );
 }
+
 function renderArtifact(artifact){
   if(!artifact)return;
   lastArtifact=artifact;
@@ -242,7 +246,6 @@ function renderArtifact(artifact){
   if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
   const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
 
-  // 只要有 AI 修改檔，就一定建立下載區；ZIP 先在背景產生，避免 iOS 點擊後才 await 被擋。
   if(Array.isArray(artifact.files)&&artifact.files.length){
     const actions=document.createElement("div");actions.className="outputActions";
     const zipBtn=document.createElement("button");
@@ -260,7 +263,6 @@ function renderArtifact(artifact){
     c.append(actions);
     preparePatchedZip(artifact,zipBtn);
   }else{
-    // AI 只回覆審查結果、沒有輸出 FILE 區塊時，也提供「目前專案 ZIP」，避免使用者完全沒有檔案可帶走。
     const actions=document.createElement("div");actions.className="outputActions";
     const zipBtn=document.createElement("button");
     zipBtn.type="button";
@@ -321,11 +323,6 @@ async function downloadPreparedZip(label="修正版"){
   if(!preparedZipBlob)return alert("ZIP 尚未準備完成");
   const filename=label==="目前專案"?"AI圓桌_目前專案.zip":"AI圓桌_修正版專案.zip";
 
-  // 原本這裡有先試 iOS 原生分享（navigator.share），理論上比較方便，
-  // 但實測發現分享選單跳出來、選了目標之後，檔案不一定真的有存進去——
-  // 這是部分 iOS 版本在網頁分享 Blob 檔案到「儲存到檔案」時的已知不穩定
-  // 行為，不是我們能控制的。改回已經證實可靠、你之前真的成功下載過的
-  // 直接下載方式，不再嘗試原生分享。
   const url=URL.createObjectURL(preparedZipBlob);
   const a=document.createElement("a");
   a.href=url;a.download=filename;a.rel="noopener";a.style.display="none";
@@ -345,14 +342,7 @@ function shouldExitChatMode(text){
   return CHAT_EXIT_KEYWORDS.some(k=>text.includes(k));
 }
 
-// iOS Safari 有個滿有名的老問題：單純呼叫 element.blur() 常常不會真的把
-// 螢幕鍵盤收起來（跟輸入框失去焦點是兩件事，iOS 有時候就是不理）。比較可靠
-// 的做法是暫時把輸入框設成唯讀，逼 iOS 認定這格「現在不能打字」而把鍵盤收
-// 起來，等收起來之後再把唯讀拿掉，下次還是能正常打字。
 function forceDismissKeyboard(){
-  // iOS/PWA：按「工程會議」後，先讓輸入框失焦，再用短暫 readonly
-  // 阻止鍵盤重新被帶回來。不要依賴 pointerdown 的 preventDefault，
-  // 否則 iOS 可能把「輸入框失焦」這個原生動作一起取消。
   try{ q.blur(); }catch(_){}
   try{ document.activeElement?.blur?.(); }catch(_){}
   q.setAttribute("readonly","readonly");
@@ -369,7 +359,7 @@ async function run(){
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
-  forceDismissKeyboard(); // 送出後立刻收起鍵盤，讓使用者能看到後面的進度／結果，不會被鍵盤擋住
+  forceDismissKeyboard();
   addCard("me","你",question);
 
   let isChat=chatModeEl.checked;
@@ -430,22 +420,14 @@ function triggerSendFromTouch(e){
   run();
   setTimeout(()=>{sendGestureHandled=false},700);
 }
-// 這裡改成不攔截 pointerdown 的預設行為，讓 iOS 用自己原生的方式決定要不要
-// 收鍵盤／讓輸入框失焦；不再靠「preventDefault 讓鍵盤維持開啟」這招（那招
-// 在部分 iOS 版本會連 iOS 原生的失焦動作也一起取消，反而更不可靠）。
-// 改成直接在 pointerdown 當下就觸發 triggerSendFromTouch()，不等 iOS 決定
-// 完才送出——送出跟收鍵盤兩件事分開處理，run() 裡面會自己呼叫
-// forceDismissKeyboard() 確保鍵盤真的收起來。
+
 send.addEventListener("pointerdown",e=>{
   if(send.disabled)return;
-  // 不再 preventDefault：讓 iOS 自己完成 textarea 的原生失焦/收鍵盤。
-  // pointerdown 仍作為第一時間送出的保險；click/submit 會由
-  // sendGestureHandled 擋掉重複執行。
   if(e.pointerType!=="mouse"){
     triggerSendFromTouch(e);
   }
 });
-// iOS/PWA：用 form submit 作為主路徑；touch/pointer 只作為第一時間觸發的保險。
+
 composerForm.addEventListener("submit",e=>{
   e.preventDefault();
   if(sendGestureHandled)return;
@@ -467,13 +449,18 @@ send.addEventListener("click",e=>{
   run();
 });
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
-$("#clear").onclick=()=>{chat.innerHTML="";chatHistory=[]};
 
-// AI 圓桌整頁本身是可以自由捲動的長頁面（附件、開關、對話紀錄都在
-// 同一頁），跟存股 App 那種「彈出視窗」不一樣，不能把整頁鎖死──那樣
-// 連對話該有的自動捲動（AI 回覆時捲到最新訊息）都會一起被擋住。
-// 這裡改成輕量做法：只在輸入框拿到焦點時記住當下的捲動位置，完全不
-// 阻擋任何捲動；等輸入框失去焦點（收鍵盤）時，才把頁面撐回記住的位置。
+// 優化：清除結果時同步釋放 Map 與 Blob 記憶體
+$("#clear").onclick=()=>{
+  chat.innerHTML="";
+  chatHistory=[];
+  workspace.clear();
+  renderFiles();
+  lastArtifact=null;
+  preparedZipBlob=null;
+  status.textContent="已清除歷史與工作區附件";
+};
+
 let bgScrollY=0;
 q.addEventListener("focus",()=>{bgScrollY=window.scrollY;});
 q.addEventListener("blur",()=>{window.scrollTo(0,bgScrollY);});
