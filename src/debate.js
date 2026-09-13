@@ -596,12 +596,15 @@ ${b}
   // JSON 說明（summary/rootCause/...）跟檔案內容是分開解析的：檔案內容用純文字
   // 分隔符傳輸，不受 JSON 跳脫/截斷影響，就算長度上限被打斷，也只會少幾行程式碼，
   // 不會讓整包回覆（連帶已經完整生成的說明文字）一起變成無法解析的廢文字。
+  // 這裡刻意叫 outputFiles（不是 files）——外層已經有一個 const files 是「使用者
+  // 上傳的原始檔案清單」，這裡指的是「AI 這次輸出的修改後檔案」，是不同的東西，
+  // 撞名會導致變數重複宣告的編譯錯誤。
   const metaJson = extractJson(finalRaw);
   const { files: newFormatFiles, truncated: filesTruncated } = extractFileBlocks(finalRaw);
 
-  let files = newFormatFiles;
+  let outputFiles = newFormatFiles;
   let usedLegacyRecovery = false;
-  if (!files.length) {
+  if (!outputFiles.length) {
     // 模型沒照新格式寫（還是習慣把檔案塞進 JSON 的 "files" 欄位），這裡退回救援：
     // 先看 metaJson.files 能不能直接讀到；如果外層 JSON 整個因為截斷而解析失敗
     // （metaJson 是 null），再用寬鬆的 regex 逐個撈出「本身完整收尾」的檔案物件——
@@ -611,21 +614,23 @@ ${b}
       : [];
     const fromLenient = extractLegacyEmbeddedFiles(finalRaw);
     const seen = new Set();
-    files = [...fromMeta, ...fromLenient].filter((f) => {
+    outputFiles = [...fromMeta, ...fromLenient].filter((f) => {
       if (seen.has(f.path)) return false;
       seen.add(f.path);
       return true;
     });
-    usedLegacyRecovery = files.length > 0;
+    usedLegacyRecovery = outputFiles.length > 0;
   }
 
-  // metaJson 跟 files 可能「兩個都是空的」——AI 這次乾脆整段用純文字回答，
+  // metaJson 跟 outputFiles 可能「兩個都是空的」——AI 這次乾脆整段用純文字回答，
   // 完全沒有照規格輸出 JSON 或 FILE 區塊。這種情況以前會讓 artifact 變成
   // null，直接跳過下面所有除錯機制，前端退回顯示原始文字、使用者完全看不出
   // 發生什麼事。這裡改成「不管多失敗，都至少生出一個 artifact 物件」，讓
   // 除錯資訊一定會被夾帶回去，不會因為連 JSON 外殼都沒有就整組放棄。
-  const artifact = metaJson || files.length || finalRaw
-    ? { ...(metaJson || {}), files }
+  // 用 let 宣告是因為下面「逐檔輸出救援」成功時，可能需要在 artifact 原本是
+  // null 的情況下重新賦值一個新物件給它。
+  let artifact = metaJson || outputFiles.length || finalRaw
+    ? { ...(metaJson || {}), files: outputFiles }
     : null;
   const treatAsTruncated = filesTruncated || (usedLegacyRecovery && !metaJson);
   if (artifact && treatAsTruncated) {
@@ -636,10 +641,10 @@ ${b}
   }
   // AI 有時候會只用文字「聲稱」已經改好檔案，卻沒有真的輸出任何 FILE 區塊或
   // JSON files 欄位（甚至連 JSON 說明本身都沒有、整段純文字回答）——這種情況
-  // files 會是空陣列，使用者會看不到下載按鈕、也搞不清楚發生什麼事。這裡把
+  // outputFiles 會是空陣列，使用者會看不到下載按鈕、也搞不清楚發生什麼事。這裡把
   // 原始回覆的前一段內容存起來，讓前端可以顯示出來，方便回報問題時直接截圖
   // 給人看，而不用用猜的。
-  if (artifact && !files.length) {
+  if (artifact && !outputFiles.length) {
     if (!metaJson) {
       // 連 JSON 說明外殼都沒有——AI 這次整段都是純文字，summary 用不到，
       // 直接把它當成整段說明顯示，並附上除錯預覽。
@@ -654,7 +659,7 @@ ${b}
   // 若最終模型只做了審查、沒有輸出 FILE 區塊，改用「逐檔輸出救援」。
   // 不再一次要求 AI 同時重寫整個專案；每次只給一個原始檔，讓模型完整重建該檔案，
   // 大幅降低輸出過長、被截斷、只寫說明不寫檔案的機率。
-  if (!files.length && Array.isArray(rawFiles) && rawFiles.length > 0) {
+  if (!outputFiles.length && Array.isArray(rawFiles) && rawFiles.length > 0) {
     const rescueFiles = normalizeFiles(rawFiles).filter(f => f.path && typeof f.content === "string");
     const rescueOut = [];
     const rescueErrors = [];
@@ -708,14 +713,14 @@ ${target.content}
     }
 
     if (rescueOut.length) {
-      files = rescueOut;
+      outputFiles = rescueOut;
       if (artifact) {
-        artifact.files = files;
+        artifact.files = outputFiles;
         artifact.instructions = (Array.isArray(artifact.instructions) ? artifact.instructions : [])
           .filter(x => !String(x).includes("這次 AI 沒有輸出任何檔案內容"));
         delete artifact.debugRawPreview;
       } else {
-        artifact = { files };
+        artifact = { files: outputFiles };
       }
       if (rescueErrors.length) {
         artifact.instructions = [
@@ -723,7 +728,7 @@ ${target.content}
           `⚠️ 部分檔案救援失敗：${rescueErrors.join("；")}`,
         ];
       }
-      if (files.some(f => f.truncated)) {
+      if (outputFiles.some(f => f.truncated)) {
         artifact.instructions = [
           ...(Array.isArray(artifact.instructions) ? artifact.instructions : []),
           "⚠️ 救援輸出的檔案疑似被截斷，下載後請檢查檔案結尾。",
