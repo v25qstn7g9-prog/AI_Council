@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v3.8.2 · 工程協作</title>
+<title>AI 圓桌 v3.8.1 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -98,8 +98,8 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v3.8.2 · 可插拔 AI</span>
-<div><button type="button" id="clear" class="secondary">清除結果</button> <button type="button" id="send">工程會議</button></div>
+<span id="status" class="badge">v3.8.1 · 可插拔 AI</span>
+<div><button id="clear" class="secondary">清除結果</button> <button id="send">工程會議</button></div>
 </div>
 </div>
 </footer>
@@ -117,6 +117,8 @@ const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
 let workspace=new Map();
 let lastArtifact=null;
 let chatHistory=[];
+let preparedZipBlob=null;
+let preparedZipBusy=false;
 
 function ext(name){const p=String(name).split(".");return p.length>1?p.pop().toLowerCase():""}
 function human(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB"}
@@ -225,13 +227,11 @@ async function buildPayloadImages(){
   }
   return arr;
 }
-let preparedZipUrl="";
-let preparedZipBusy=false;
-
 function renderArtifact(artifact){
   if(!artifact)return;
   lastArtifact=artifact;
-  if(preparedZipUrl){URL.revokeObjectURL(preparedZipUrl);preparedZipUrl="";}
+  preparedZipBlob=null;
+  preparedZipBusy=false;
   const lines=[];
   if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
   if(Array.isArray(artifact.verified)&&artifact.verified.length)lines.push("已證實：\n- "+artifact.verified.join("\n- "));
@@ -241,6 +241,8 @@ function renderArtifact(artifact){
   if(Array.isArray(artifact.review)&&artifact.review.length)lines.push("Reviewer 核對：\n- "+artifact.review.join("\n- "));
   if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
   const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
+
+  // 只要有 AI 修改檔，就一定建立下載區；ZIP 先在背景產生，避免 iOS 點擊後才 await 被擋。
   if(Array.isArray(artifact.files)&&artifact.files.length){
     const actions=document.createElement("div");actions.className="outputActions";
     const zipBtn=document.createElement("button");
@@ -256,12 +258,23 @@ function renderArtifact(artifact){
       actions.append(warn);
     }
     c.append(actions);
-
-    // iOS Safari / PWA 可能在使用者點擊後才 await ZIP 壓縮時失去
-    // user activation，導致最後的 a.click() 被瀏覽器擋掉。
-    // 所以收到 AI 結果後先把 ZIP 壓好；真正按下載鍵時只做同步下載。
     preparePatchedZip(artifact,zipBtn);
+  }else{
+    // AI 只回覆審查結果、沒有輸出 FILE 區塊時，也提供「目前專案 ZIP」，避免使用者完全沒有檔案可帶走。
+    const actions=document.createElement("div");actions.className="outputActions";
+    const zipBtn=document.createElement("button");
+    zipBtn.type="button";
+    zipBtn.textContent="準備目前專案 ZIP…";
+    zipBtn.disabled=true;
+    actions.append(zipBtn);
+    const note=document.createElement("div");
+    note.style.cssText="font-size:11px;color:#9da6b8;margin-top:6px";
+    note.textContent="⚠️ AI 這次沒有輸出修改後檔案；此 ZIP 會打包你剛上傳的原始專案，不代表已修正。";
+    actions.append(note);
+    c.append(actions);
+    preparePatchedZip({files:[]},zipBtn,"目前專案");
   }
+
   if(typeof artifact.debugRawPreview==="string"&&artifact.debugRawPreview){
     const pre=document.createElement("pre");
     pre.style.cssText="margin-top:8px;padding:8px;background:#0b0d12;border:1px solid var(--line);border-radius:8px;font-size:10px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto;color:#9da6b8";
@@ -270,7 +283,7 @@ function renderArtifact(artifact){
   }
 }
 
-async function preparePatchedZip(artifact,zipBtn){
+async function preparePatchedZip(artifact,zipBtn,label="修正版"){
   if(typeof JSZip==="undefined"){
     zipBtn.disabled=false;
     zipBtn.textContent="JSZip 未載入，無法產生 ZIP";
@@ -289,29 +302,42 @@ async function preparePatchedZip(artifact,zipBtn){
       if(!f?.path||typeof f.content!=="string")continue;
       z.file(String(f.path).replace(/^\/+/,""),f.content);
     }
-    const blob=await z.generateAsync({type:"blob",compression:"DEFLATE"});
-    if(preparedZipUrl)URL.revokeObjectURL(preparedZipUrl);
-    preparedZipUrl=URL.createObjectURL(blob);
+    preparedZipBlob=await z.generateAsync({type:"blob",compression:"DEFLATE"});
     zipBtn.disabled=false;
-    zipBtn.textContent=`下載修正版 ZIP（${artifact.files.length} 檔修改）`;
-    zipBtn.onclick=()=>{
-      if(!preparedZipUrl)return;
-      const a=document.createElement("a");
-      a.href=preparedZipUrl;
-      a.download="AI圓桌_修正版專案.zip";
-      a.style.display="none";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    };
+    zipBtn.textContent=label==="目前專案" ? "下載目前專案 ZIP" : `下載修正版 ZIP（${artifact.files.length} 檔修改）`;
+    zipBtn.onclick=()=>downloadPreparedZip(label);
   }catch(e){
+    preparedZipBlob=null;
     zipBtn.disabled=false;
     zipBtn.textContent="ZIP 產生失敗，重試";
-    zipBtn.onclick=()=>preparePatchedZip(artifact,zipBtn);
+    zipBtn.onclick=()=>preparePatchedZip(artifact,zipBtn,label);
     addCard("err","ZIP 產生失敗",String(e?.message||e||"未知錯誤"));
   }finally{
     preparedZipBusy=false;
   }
+}
+
+async function downloadPreparedZip(label="修正版"){
+  if(!preparedZipBlob)return alert("ZIP 尚未準備完成");
+  const filename=label==="目前專案"?"AI圓桌_目前專案.zip":"AI圓桌_修正版專案.zip";
+  const file=new File([preparedZipBlob],filename,{type:"application/zip"});
+
+  // iPhone / iPad 優先走原生分享，可直接存到「檔案」；這比 blob:<a download> 在 PWA 更可靠。
+  try{
+    if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+      await navigator.share({files:[file],title:filename});
+      return;
+    }
+  }catch(e){
+    if(e?.name==="AbortError")return;
+  }
+
+  const url=URL.createObjectURL(preparedZipBlob);
+  const a=document.createElement("a");
+  a.href=url;a.download=filename;a.rel="noopener";a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},3000);
 }
 
 function searchLabel(s){
@@ -381,14 +407,22 @@ async function run(){
     addCard("err","工程會議失敗",e.message);status.textContent="失敗";
   }finally{send.disabled=false;q.focus()}
 }
-// iOS / PWA：觸控按鈕直接在 pointerdown 送出，不等待 click。
+let sendGestureHandled=false;
+function triggerSendFromTouch(e){
+  if(send.disabled)return;
+  sendGestureHandled=true;
+  if(e.cancelable)e.preventDefault();
+  run();
+  setTimeout(()=>{sendGestureHandled=false},500);
+}
+send.addEventListener("touchstart",triggerSendFromTouch,{passive:false});
 send.addEventListener("pointerdown",e=>{
-  if(e.pointerType==="touch" || e.pointerType==="pen"){
-    e.preventDefault();
-    run();
-  }
+  if(e.pointerType!=="mouse")triggerSendFromTouch(e);
 });
-send.onclick=run;
+send.addEventListener("click",e=>{
+  if(sendGestureHandled){e.preventDefault();return;}
+  run();
+});
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 $("#clear").onclick=()=>{chat.innerHTML="";chatHistory=[]};
 
