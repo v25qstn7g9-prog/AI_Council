@@ -320,18 +320,12 @@ async function preparePatchedZip(artifact,zipBtn,label="修正版"){
 async function downloadPreparedZip(label="修正版"){
   if(!preparedZipBlob)return alert("ZIP 尚未準備完成");
   const filename=label==="目前專案"?"AI圓桌_目前專案.zip":"AI圓桌_修正版專案.zip";
-  const file=new File([preparedZipBlob],filename,{type:"application/zip"});
 
-  // iPhone / iPad 優先走原生分享，可直接存到「檔案」；這比 blob:<a download> 在 PWA 更可靠。
-  try{
-    if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
-      await navigator.share({files:[file],title:filename});
-      return;
-    }
-  }catch(e){
-    if(e?.name==="AbortError")return;
-  }
-
+  // 原本這裡有先試 iOS 原生分享（navigator.share），理論上比較方便，
+  // 但實測發現分享選單跳出來、選了目標之後，檔案不一定真的有存進去——
+  // 這是部分 iOS 版本在網頁分享 Blob 檔案到「儲存到檔案」時的已知不穩定
+  // 行為，不是我們能控制的。改回已經證實可靠、你之前真的成功下載過的
+  // 直接下載方式，不再嘗試原生分享。
   const url=URL.createObjectURL(preparedZipBlob);
   const a=document.createElement("a");
   a.href=url;a.download=filename;a.rel="noopener";a.style.display="none";
@@ -416,6 +410,16 @@ function triggerSendFromTouch(e){
   run();
   setTimeout(()=>{sendGestureHandled=false},700);
 }
+// 關鍵：瀏覽器「要不要把目前聚焦的輸入框失焦、收起鍵盤」這個決定，是在
+// pointerdown（手指剛碰到螢幕那一刻）就已經定案了——比 touchend/click 早得多。
+// 下面這些監聽器都只在 touchend 之後才 preventDefault，那時候鍵盤已經在收起
+// 的路上，這就是「鍵盤開著時按第一下沒反應、要點兩次」的成因。這裡在
+// pointerdown 就先攔截，阻止預設的失焦行為，讓鍵盤在點擊送出鍵時維持原狀、
+// 不會被硬收起，後面 touchend/click 還是照樣正常觸發 run()。
+send.addEventListener("pointerdown",e=>{
+  if(send.disabled)return;
+  if(e.pointerType!=="mouse"&&e.cancelable)e.preventDefault();
+});
 // iOS/PWA：用 form submit 作為主路徑；touch/pointer 只作為第一時間觸發的保險。
 composerForm.addEventListener("submit",e=>{
   e.preventDefault();
