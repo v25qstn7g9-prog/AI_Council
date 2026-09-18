@@ -653,9 +653,35 @@ ${b}
     const completePaths = new Set(
       outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => f.path)
     );
-    const rescueFiles = normalizeFiles(rawFiles)
-      .filter((f) => f.path && typeof f.content === "string" && !completePaths.has(f.path))
-      .slice(0, MAX_RESCUE_FILES);
+
+    // Rescue 優先處理「真的被指出要改」或「已被截斷」的檔案，
+    // 避免最終模型只漏掉一個檔案時，無意間再花額度重做前 5 個附件。
+    const mentionedPaths = new Set(
+      [a, b, q]
+        .join("\n")
+        .match(/(?:src|public)\/[^\s"'\`<>]+|wrangler\.jsonc|README\.md/g) || []
+    );
+    const truncatedPaths = outputFiles
+      .filter((f) => f?.truncated && f.path)
+      .map((f) => f.path);
+
+    const normalizedRawFiles = normalizeFiles(rawFiles);
+    const rescueCandidates = [];
+    for (const path of [...truncatedPaths, ...mentionedPaths]) {
+      const hit = normalizedRawFiles.find((f) => f.path === path);
+      if (hit && !completePaths.has(hit.path) && !rescueCandidates.some((f) => f.path === hit.path)) {
+        rescueCandidates.push(hit);
+      }
+    }
+
+    // 完全無法從 A/B/任務判斷目標檔案時，只做 1 檔保守救援，
+    // 而不是一次重做最多 5 檔。
+    if (!rescueCandidates.length && !hadTruncationSignal && !outputFiles.length) {
+      const fallback = normalizedRawFiles.find((f) => !completePaths.has(f.path));
+      if (fallback) rescueCandidates.push(fallback);
+    }
+
+    const rescueFiles = rescueCandidates.slice(0, MAX_RESCUE_FILES);
     const rescueOut = [];
     const rescueErrors = [];
 
