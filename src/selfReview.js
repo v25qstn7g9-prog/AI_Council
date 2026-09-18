@@ -13,6 +13,7 @@ const SELF_REVIEW_FILES = [
   "wrangler.jsonc",
   "README.md",
 ];
+const SELF_REVIEW_FILE_SET = new Set(SELF_REVIEW_FILES);
 
 const SELF_REVIEW_QUESTION = `這是 AI 圓桌自己的原始碼，請對整個專案做一次自我健檢：
 1. 找出目前程式碼裡潛在的 bug、邏輯不一致，或使用者體驗上的落差。
@@ -150,7 +151,9 @@ export async function runSelfReview(env) {
 
   const artifact = result.artifact;
   const proposedFiles = Array.isArray(artifact?.files)
-    ? artifact.files.filter(f => f?.path && typeof f.content === "string")
+    ? artifact.files
+        .filter(f => f?.path && SELF_REVIEW_FILE_SET.has(String(f.path).replace(/^\/+/, "")) && typeof f.content === "string")
+        .map(f => ({ ...f, path: String(f.path).replace(/^\/+/, "") }))
     : [];
 
   const dateLabel = new Date().toISOString().slice(0, 10);
