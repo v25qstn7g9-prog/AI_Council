@@ -379,7 +379,7 @@ function extractJson(text) {
 
 function normalizeOutputPath(value) {
   const raw = String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
-  if (!raw || raw.length > 220 || raw.includes("\\0")) return "";
+  if (!raw || raw.length > 220 || raw.includes("\0")) return "";
   if (/^[A-Za-z]:\//.test(raw) || raw.startsWith("//")) return "";
   const parts = raw.split("/");
   if (parts.some(part => !part || part === "." || part === "..")) return "";
