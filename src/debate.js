@@ -799,10 +799,15 @@ export async function onRequestPost(context) {
     }
     if (!env.AI) return out({ error:"尚未設定 Cloudflare AI Binding（Variable name: AI）" }, 500);
 
+    const MAX_BODY_BYTES = 20 * 1024 * 1024;
     const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > 20 * 1024 * 1024) return out({ error:"請求內容超過 20MB，請減少附件或圖片" }, 413);
+    if (contentLength > MAX_BODY_BYTES) return out({ error:"請求內容超過 20MB，請減少附件或圖片" }, 413);
 
-    const body = await request.json().catch(() => null);
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+      return out({ error:"請求內容超過 20MB，請減少附件或圖片" }, 413);
+    }
+    const body = rawBody.trim() ? (() => { try { return JSON.parse(rawBody); } catch { return null; } })() : null;
     const q = String(body?.question || "").trim();
     if (!q) return out({ error:"沒有收到任務說明" }, 400);
     if (q.length > MAX_Q) return out({ error:"任務說明太長" }, 400);
