@@ -884,9 +884,7 @@ export async function onRequestPost(context) {
     const s = String(e?.message || e || "");
     return out({
       error:/Cloudflare AI.*(3036|429)|daily free allocation|used up your daily free allocation/i.test(s)
-        ? (s.includes("Gemini 3.5 備援失敗")
-            ? `Cloudflare AI 可能達到限制，而且 Gemini 備援也失敗：${s}`
-            : "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂")
+        ? "Cloudflare AI 額度可能已達限制，備援服務也暫時無法使用"
         : sanitizeInternalError(s)
     }, 500);
   }
