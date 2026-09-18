@@ -32,16 +32,37 @@ async function safeCompare(a, b) {
   return crypto.subtle.timingSafeEqual(aBuf, bBuf);
 }
 
+async function checkSelfReviewRateLimit(env) {
+  const raw = String(env.SELF_REVIEW_RATE_LIMIT || "1:21600");
+  const [maxStr, windowStr] = raw.split(":");
+  const max = Number(maxStr), windowSec = Number(windowStr);
+  if (!max || !windowSec || !env.council_kv) return { ok: true };
+
+  const key = "self-review:global";
+  const current = Number((await env.council_kv.get(key)) || 0);
+  if (current >= max) {
+    return {
+      ok: false,
+      message: `自我健檢太頻繁了，${Math.round(windowSec / 3600)} 小時內最多 ${max} 次，先讓圓桌休息一下 😅`,
+    };
+  }
+  await env.council_kv.put(key, String(current + 1), { expirationTtl: windowSec });
+  return { ok: true };
+}
+
 async function handleSelfReviewRequest(request, env) {
   const configuredToken = await readSecret(env, "SELF_REVIEW_TOKEN");
   if (!configuredToken) {
     return json({ ok: false, error: "尚未設定 SELF_REVIEW_TOKEN，手動觸發已停用（排程仍會照常執行）" }, 403);
   }
-  const givenToken = request.headers.get("x-self-review-token") || new URL(request.url).searchParams.get("token") || "";
+  const givenToken = request.headers.get("x-self-review-token") || "";
   const isValid = await safeCompare(givenToken, configuredToken);
   if (!isValid) {
     return json({ ok: false, error: "token 不正確" }, 401);
   }
+  const rl = await checkSelfReviewRateLimit(env);
+  if (!rl.ok) return json({ ok: false, error: rl.message }, 429);
+
   try {
     const result = await runSelfReview(env);
     return json(result);
