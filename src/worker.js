@@ -70,7 +70,7 @@ async function handleSelfReviewRequest(request, env) {
     const result = await runSelfReview(env);
     return json(result);
   } catch (e) {
-    return json({ ok: false, error: String(e?.message || e || "自我健檢執行失敗") }, 500);
+    return json({ ok: false, error: "自我健檢執行失敗，請稍後再試" }, 500);
   }
 }
 
