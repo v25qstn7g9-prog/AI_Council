@@ -75,15 +75,16 @@ async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
-  const wantsJson = maxTokens >= FINAL_MAX_TOKENS;
+  // 最終整合輸出是「JSON 摘要 + FILE 區塊」的混合格式，
+  // 不可要求 Gemini 強制輸出 application/json，否則 FILE 區塊可能被截掉。
+  const isFinalIntegration = maxTokens >= FINAL_MAX_TOKENS;
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
       maxOutputTokens: maxTokens,
       thinkingConfig: {
-        thinkingLevel: wantsJson ? "high" : "low",
+        thinkingLevel: isFinalIntegration ? "high" : "low",
       },
-      ...(wantsJson ? { responseMimeType: "application/json" } : {}),
     },
   };
   if (systemMsg && systemMsg.content.trim()) {
