@@ -772,14 +772,17 @@ export async function onRequestPost(context) {
     }
     if (!env.AI) return out({ error:"尚未設定 Cloudflare AI Binding（Variable name: AI）" }, 500);
 
-    const ip = request.headers.get("cf-connecting-ip") || "";
-    const rl = await checkRateLimit(env, ip);
-    if (!rl.ok) return out({ error:rl.message }, 429);
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > 20 * 1024 * 1024) return out({ error:"請求內容超過 20MB，請減少附件或圖片" }, 413);
 
     const body = await request.json().catch(() => null);
     const q = String(body?.question || "").trim();
     if (!q) return out({ error:"沒有收到任務說明" }, 400);
     if (q.length > MAX_Q) return out({ error:"任務說明太長" }, 400);
+
+    const ip = request.headers.get("cf-connecting-ip") || "";
+    const rl = await checkRateLimit(env, ip);
+    if (!rl.ok) return out({ error:rl.message }, 429);
 
     const chatMode = body?.chatMode === true;
 
