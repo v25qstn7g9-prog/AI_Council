@@ -26,10 +26,13 @@ async function readSecret(env, name) {
 async function safeCompare(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const encoder = new TextEncoder();
-  const aBuf = encoder.encode(a);
-  const bBuf = encoder.encode(b);
-  if (aBuf.byteLength !== bBuf.byteLength) return false;
-  return crypto.subtle.timingSafeEqual(aBuf, bBuf);
+  // 先雜湊成固定 32-byte 長度，再做 constant-time compare，
+  // 避免因原始 token 長度不同而在比較前提前返回。
+  const [aHash, bHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+  return crypto.subtle.timingSafeEqual(new Uint8Array(aHash), new Uint8Array(bHash));
 }
 
 async function checkSelfReviewRateLimit(env) {
