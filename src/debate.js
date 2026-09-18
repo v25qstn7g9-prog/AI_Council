@@ -23,6 +23,7 @@ const MAX_FILES = 30;
 const MAX_FILE_CHARS = 30000;
 const MAX_TOTAL_FILE_CHARS = 180000;
 const MAX_IMAGES = 4;
+const MAX_RESCUE_FILES = 5;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
 const MAX_REVIEW_FILE_CHARS = 30000;
 const FINAL_MAX_TOKENS = 24000;
@@ -630,7 +631,8 @@ ${b}
       outputFiles.filter((f) => f && f.content && !f.truncated).map((f) => f.path)
     );
     const rescueFiles = normalizeFiles(rawFiles)
-      .filter((f) => f.path && typeof f.content === "string" && !completePaths.has(f.path));
+      .filter((f) => f.path && typeof f.content === "string" && !completePaths.has(f.path))
+      .slice(0, MAX_RESCUE_FILES);
     const rescueOut = [];
     const rescueErrors = [];
 
