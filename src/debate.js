@@ -43,6 +43,15 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
+function sanitizeInternalError(value) {
+  const s = String(value?.message || value || "").replace(/[\r\n]+/g, " ").trim();
+  if (!s) return "未知錯誤";
+  if (/429/.test(s)) return "上游服務暫時忙碌或已達速率限制";
+  if (/timeout|逾時/i.test(s)) return "上游服務逾時";
+  if (/401|403|api.?key|unauthorized|forbidden/i.test(s)) return "上游服務驗證失敗";
+  return "上游服務暫時無法使用";
+}
+
 function out(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -199,13 +208,13 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       if (!key) throw e;
       try {
         const text = await askGemini(env, key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: "Cloudflare 失敗，已切換 Gemini" };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 與 Gemini 備援皆失敗：${sanitizeInternalError(ge)}`);
       }
     }
     const text = await ask(ai, MODEL_A_FALLBACK, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `GPT-OSS 120B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    return { text, source: `GPT-OSS 120B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗，已切換 Cloudflare 備援` };
   }
 }
 
@@ -219,13 +228,13 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
       if (!key) throw e;
       try {
         const text = await askGemini(env, key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: `Cloudflare 失敗，已切換 Gemini：${String(e?.message || e || "")}` };
+        return { text, source: "Gemini 3.5（Cloudflare 額度自動備援）", debug: "Cloudflare 失敗，已切換 Gemini" };
       } catch (ge) {
-        throw new Error(`Cloudflare 失敗：${String(e?.message || e || "")}；Gemini 備援失敗：${String(ge?.message || ge || "")}`);
+        throw new Error(`Cloudflare 與 Gemini 備援皆失敗：${sanitizeInternalError(ge)}`);
       }
     }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
-    return { text, source: `Qwen3 30B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗：${String(e?.message || e || "")}` };
+    return { text, source: `Qwen3 30B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗，已切換 Cloudflare 備援` };
   }
 }
 
@@ -234,7 +243,7 @@ async function searchWeb(env, query) {
   try {
     if (apiKey && typeof apiKey.get === "function") apiKey = await apiKey.get();
   } catch (e) {
-    return { ok:false, used:false, reason:"key_read_failed", message:"讀取 TAVILY_API_KEY 失敗", detail:String(e?.message||e||""), text:"", resultCount:0 };
+    return { ok:false, used:false, reason:"key_read_failed", message:"讀取 TAVILY_API_KEY 失敗", detail:undefined, text:"", resultCount:0 };
   }
   apiKey = String(apiKey || "").trim();
   if (!apiKey) return { ok:false, used:false, reason:"no_api_key", message:"尚未設定 TAVILY_API_KEY", text:"", resultCount:0 };
@@ -257,7 +266,7 @@ async function searchWeb(env, query) {
         ok:false, used:false,
         reason: r.status===401||r.status===403 ? "auth_failed" : r.status===429 ? "quota_or_rate_limit" : "provider_error",
         message: r.status===401||r.status===403 ? "Tavily API Key 驗證失敗" : r.status===429 ? "Tavily 額度或速率限制已達上限" : `Tavily 搜尋失敗（HTTP ${r.status}）`,
-        detail:String(data?.detail||data?.message||data?.error||"").slice(0,300),
+        detail:undefined,
         text:"", resultCount:0
       };
     }
@@ -270,7 +279,7 @@ async function searchWeb(env, query) {
       text:results.map((x,i)=>`${i+1}. ${x.title||"（無標題）"}\n${x.content||""}\n來源：${x.url||""}`).join("\n\n")
     };
   } catch (e) {
-    return { ok:false, used:false, reason:"network_error", message:"Tavily 連線失敗", detail:String(e?.message||e||"").slice(0,300), text:"", resultCount:0 };
+    return { ok:false, used:false, reason:"network_error", message:"Tavily 連線失敗", detail:undefined.slice(0,300), text:"", resultCount:0 };
   }
 }
 
@@ -301,7 +310,7 @@ async function analyzeImage(ai, image) {
     const t = txt(r);
     return { name, ok:Boolean(t), text:t || "Vision 模型沒有回傳文字" };
   } catch (e) {
-    return { name, ok:false, text:`圖片分析失敗：${String(e?.message||e||"")}` };
+    return { name, ok:false, text:"圖片分析失敗：上游視覺服務暫時無法使用" };
   }
 }
 
@@ -878,7 +887,7 @@ export async function onRequestPost(context) {
         ? (s.includes("Gemini 3.5 備援失敗")
             ? `Cloudflare AI 可能達到限制，而且 Gemini 備援也失敗：${s}`
             : "Cloudflare AI 額度可能已用完，今天先讓工程師下班 😂")
-        : s || "AI 工程圓桌執行失敗"
+        : sanitizeInternalError(s)
     }, 500);
   }
 }
