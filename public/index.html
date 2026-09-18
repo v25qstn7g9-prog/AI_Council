@@ -113,7 +113,7 @@ const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileSta
 
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
-const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4;
+const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4, MAX_ZIP_ENTRIES=100;
 let workspace=new Map();
 let lastArtifact=null;
 let chatHistory=[];
@@ -160,14 +160,17 @@ async function addLoose(file,path=file.name){
 async function addZip(file){
   if(typeof JSZip==="undefined")throw Error("JSZip 尚未載入，請重新整理後再試");
   const z=await JSZip.loadAsync(file);
-  let count=0;
+  let count=0, textChars=0, entryCount=0;
   for(const [path,entry] of Object.entries(z.files)){
+    if(++entryCount>MAX_ZIP_ENTRIES)throw Error(`ZIP 檔案數超過 ${MAX_ZIP_ENTRIES} 個`);
     if(entry.dir)continue;
     const base=path.split("/").pop()||"";
     if(path.startsWith("__MACOSX/")||base.startsWith("._")||base===".DS_Store")continue;
     const e=ext(path);
     if(TEXT_EXT.has(e)){
       const content=await entry.async("string");
+      textChars+=content.length;
+      if(textChars>MAX_TOTAL_CHARS)throw Error(`ZIP 文字內容超過 ${MAX_TOTAL_CHARS.toLocaleString()} 字元`);
       workspace.set(path,{path,kind:"text",file:new File([content],path),content});
       count++;
     }else if(IMG_EXT.has(e) && [...workspace.values()].filter(x=>x.kind==="image").length<MAX_IMAGES){
