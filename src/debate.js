@@ -377,6 +377,26 @@ function extractJson(text) {
   return null;
 }
 
+function normalizeOutputPath(value) {
+  const raw = String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  if (!raw || raw.length > 220 || raw.includes("\\0")) return "";
+  if (/^[A-Za-z]:\//.test(raw) || raw.startsWith("//")) return "";
+  const parts = raw.split("/");
+  if (parts.some(part => !part || part === "." || part === "..")) return "";
+  return raw;
+}
+
+function sanitizeOutputFiles(files) {
+  const seen = new Set();
+  return (Array.isArray(files) ? files : []).filter(f => {
+    const path = normalizeOutputPath(f?.path);
+    if (!path || typeof f?.content !== "string" || seen.has(path)) return false;
+    seen.add(path);
+    f.path = path;
+    return true;
+  });
+}
+
 function extractFileBlocks(text) {
   const s = String(text || "");
   const re = /=====\s*FILE\s*:\s*([^\n=]+?)\s*=====\r?\n([\s\S]*?)(\r?\n=====\s*ENDFILE\s*=====|$)/gi;
@@ -603,6 +623,8 @@ ${b}
     });
     usedLegacyRecovery = outputFiles.length > 0;
   }
+
+  outputFiles = sanitizeOutputFiles(outputFiles);
 
   let artifact = metaJson || outputFiles.length || finalRaw
     ? { ...(metaJson || {}), files: outputFiles }
