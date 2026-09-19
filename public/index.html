@@ -492,7 +492,10 @@ async function run(){
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       addCard("a","AI A · 主工程師",d.a||"");
       addCard("b","AI B · Reviewer",d.b||"");
-      if(d.final)addCard("judge","最終整合",d.final);
+      // GitHub 工程模式也必須走 renderArtifact，否則後端雖然已產生
+      // artifact.report，前端只顯示 d.final，永遠不會建立報告下載按鈕。
+      if(d.artifact)renderArtifact(d.artifact);
+      else if(d.final)addCard("judge","最終整合",d.final);
       if(d.action==="pull_request"){
         addCard("judge","🐙 GitHub PR",`已建立 Draft PR #${d.pr?.number||""}\n${d.pr?.url||""}\n\nBranch：${d.branch}\n修改：${(d.changedFiles||[]).join("、")}`);
         status.textContent="完成 · Draft PR 已建立";
