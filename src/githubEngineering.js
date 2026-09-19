@@ -565,7 +565,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.7.0",
+    version:"4.7.1",
     a:aReport,
     b:bReport,
     c:primary.report||"",
@@ -585,7 +585,10 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-abc-evidence-v4.7",
+      synthesisAttempts:primary.attempts||1,
+      synthesisDebug:primary.debug||"",
+      cCompleted:Boolean(primary.complete),
+      pipelineVersion:"full-repo-abc-evidence-v4.7.1",
       aReviewedFiles:aReviewedPaths,
       bReviewedFiles:bReviewedPaths,
     }
@@ -598,8 +601,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     const rescueReport=buildDeterministicAuditReport({
       fullName,base,question,findings,coverage
     });
-    finalResult.reportGenerationFailed=false;
-    finalResult.c=rescueReport;
+    finalResult.c="AI C 未完成證據裁決；以下最終報告為本地確定性降級證據包，不能視為 C 層判決。";
     finalResult.final=rescueReport;
     finalResult.artifact={
       ...(finalResult.artifact||{}),
@@ -610,7 +612,8 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-abc-evidence-v4.7",
+      cCompleted:false,
+      pipelineVersion:"full-repo-abc-evidence-v4.7.1",
     };
   }
 
@@ -860,7 +863,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       c:audit.result.c,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.7.0",
+      version:audit.result.version||"4.7.1",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
