@@ -581,7 +581,7 @@ ${b}
   "review": ["Reviewer 核對重點"],
   "instructions": ["後續建議"],
   "sources": []
-};
+}`;
 
     const analysisResult = await askA(env.AI, env, [
       { role:"system", content:"你是資深軟體 Code Review Lead。只做證據導向的程式碼分析，不輸出檔案，不做修改。用繁體中文，精準務實。" },
