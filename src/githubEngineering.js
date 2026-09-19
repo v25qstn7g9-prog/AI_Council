@@ -1,0 +1,445 @@
+/**
+ * githubEngineering.js — AI 圓桌 GitHub 工程模式
+ *
+ * 讀取指定 repository 的實際原始碼，交給雙 AI 討論與修改，
+ * 最後只建立新 branch + Pull Request，不直接修改 base branch。
+ */
+
+import { runEngineeringCouncil } from "./debate.js";
+
+const MAX_BODY_BYTES = 64 * 1024;
+const MAX_TASK_CHARS = 4000;
+const MAX_FILES = 30;
+const MAX_FILE_CHARS = 30000;
+const MAX_TOTAL_FILE_CHARS = 180000;
+const MAX_TREE_ENTRIES = 5000;
+const ALLOWED_EXT = new Set([
+  "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
+  "md","txt","xml","yaml","yml","toml","csv","py","java","go","rs",
+  "sql","sh","bash","vue","svelte"
+]);
+const DENIED_PREFIXES = [
+  ".git/","node_modules/","dist/","build/","coverage/","vendor/",
+  ".next/",".nuxt/","__pycache__/","target/"
+];
+const DENIED_EXACT = new Set([
+  ".env",".env.local",".env.production",".dev.vars",
+  "wrangler.toml","wrangler.json","secrets.json"
+]);
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "same-origin",
+    },
+  });
+}
+
+async function readSecret(env, name) {
+  let value = env?.[name];
+  try {
+    if (value && typeof value.get === "function") value = await value.get();
+  } catch {
+    return "";
+  }
+  return String(value || "").trim();
+}
+
+async function readJsonBody(request) {
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length > MAX_BODY_BYTES) {
+    const error = new Error("REQUEST_TOO_LARGE");
+    error.status = 413;
+    throw error;
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
+    const error = new Error("REQUEST_TOO_LARGE");
+    error.status = 413;
+    throw error;
+  }
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error("INVALID_JSON");
+    error.status = 400;
+    throw error;
+  }
+}
+
+function safePath(path) {
+  const p = String(path || "").replace(/^\/+/, "");
+  if (!p || p.length > 220 || p.includes("\0")) return "";
+  if (p.startsWith("/") || p.includes("..") || /^[A-Za-z]:[\\/]/.test(p)) return "";
+  return p;
+}
+
+function isReadableSource(path, size = 0) {
+  const p = safePath(path);
+  if (!p || size > MAX_FILE_CHARS * 2) return false;
+  if (DENIED_EXACT.has(p) || p.endsWith("/.env") || p.includes("/.env.")) return false;
+  if (DENIED_PREFIXES.some(prefix => p.startsWith(prefix))) return false;
+  const base = p.split("/").pop() || "";
+  if (base.startsWith(".env")) return false;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : "";
+  return ALLOWED_EXT.has(ext);
+}
+
+function isWritablePath(path) {
+  const p = safePath(path);
+  if (!p || DENIED_EXACT.has(p)) return false;
+  if (DENIED_PREFIXES.some(prefix => p.startsWith(prefix))) return false;
+  if (p.startsWith(".github/")) return false;
+  if (p.includes("/.env.") || p.endsWith("/.env")) return false;
+  return isReadableSource(p, 0);
+}
+
+function repoConfig(env, repoFullName) {
+  const owner = String(env.GITHUB_OWNER || "").trim();
+  const repo = String(repoFullName || "").trim();
+  if (!owner || !repo) throw new Error("GitHub 尚未完成設定");
+  const parts = repo.split("/");
+  if (parts.length !== 2 || parts[0] !== owner || !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1])) {
+    throw new Error("只允許操作 GITHUB_OWNER 底下的 repository");
+  }
+
+  const allowRaw = String(env.GITHUB_ALLOWED_REPOS || "").trim();
+  if (allowRaw && allowRaw !== "*") {
+    const allowed = new Set(allowRaw.split(",").map(x => x.trim()).filter(Boolean));
+    if (!allowed.has(repo)) throw new Error("這個 repository 不在 AI 圓桌允許清單內");
+  }
+  return { owner, repo: parts[1], fullName: repo };
+}
+
+function ghHeaders(token, extra = {}) {
+  return {
+    "accept": "application/vnd.github+json",
+    "authorization": `Bearer ${token}`,
+    "x-github-api-version": "2022-11-28",
+    "user-agent": "ai-council-github-engineering",
+    ...extra,
+  };
+}
+
+async function githubRequest(env, path, options = {}) {
+  const token = await readSecret(env, "GITHUB_TOKEN");
+  if (!token) throw new Error("GITHUB_TOKEN 尚未設定");
+
+  const response = await fetch(`https://api.github.com${path}`, {
+    ...options,
+    headers: ghHeaders(token, {
+      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...(options.headers || {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const status = response.status;
+    const error = new Error(
+      status === 401 || status === 403 ? "GitHub 權限或 Token 驗證失敗" :
+      status === 404 ? "GitHub repository / branch / resource 不存在或無權限存取" :
+      status === 409 ? "GitHub 發生版本衝突，請重新讀取後再試" :
+      status === 422 ? "GitHub 拒絕這次操作，可能是 branch / PR 已存在" :
+      status === 429 ? "GitHub API 暫時達到速率限制" :
+      "GitHub API 暫時無法使用"
+    );
+    error.status = status;
+    throw error;
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function base64ToUtf8(value) {
+  const clean = String(value || "").replace(/\s/g, "");
+  const binary = atob(clean);
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+async function fetchRepoFiles(env, fullName, base) {
+  const { owner, repo } = repoConfig(env, fullName);
+  const tree = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(base)}?recursive=1`
+  );
+
+  if (tree?.truncated) throw new Error("repository 太大，GitHub tree 被截斷；請指定較小的專案或下一版加入路徑篩選");
+  const entries = Array.isArray(tree?.tree) ? tree.tree.slice(0, MAX_TREE_ENTRIES) : [];
+  const candidates = entries
+    .filter(x => x?.type === "blob" && isReadableSource(x.path, Number(x.size || 0)))
+    .sort((a, b) => {
+      const score = p => {
+        if (/^(package\.json|wrangler\.jsonc?|README\.md)$/i.test(p)) return 0;
+        if (/^(src|functions|public)\//i.test(p)) return 1;
+        return 2;
+      };
+      return score(a.path) - score(b.path) || a.path.localeCompare(b.path);
+    })
+    .slice(0, MAX_FILES);
+
+  const files = [];
+  let total = 0;
+
+  // 讀取 GitHub 原始碼採串行，避免短時間大量 API 請求觸發 secondary rate limit。
+  for (const entry of candidates) {
+    if (total >= MAX_TOTAL_FILE_CHARS) break;
+    const blob = await githubRequest(
+      env,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(entry.sha)}`
+    );
+    if (blob?.encoding !== "base64" || typeof blob.content !== "string") continue;
+    let content = base64ToUtf8(blob.content);
+    const remaining = MAX_TOTAL_FILE_CHARS - total;
+    content = content.slice(0, Math.min(MAX_FILE_CHARS, remaining));
+    if (!content) continue;
+    total += content.length;
+    files.push({
+      path: entry.path,
+      content,
+      size: Number(entry.size || content.length),
+    });
+  }
+
+  if (!files.length) throw new Error("找不到可供 AI 審查的文字原始碼");
+  return { files, treeEntryCount: entries.length, truncated: false };
+}
+
+function validateProposedFiles(proposed, originalMap) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of Array.isArray(proposed) ? proposed : []) {
+    const path = safePath(raw?.path);
+    if (!path || seen.has(path) || !isWritablePath(path)) continue;
+    if (!originalMap.has(path)) continue;
+    if (typeof raw?.content !== "string") continue;
+    if (raw.content.length > MAX_FILE_CHARS * 2) continue;
+    const original = originalMap.get(path);
+    if (raw.content === original) continue;
+    seen.add(path);
+    out.push({ path, content: raw.content });
+  }
+  return out;
+}
+
+function slugify(text) {
+  const s = String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return s || "code-change";
+}
+
+async function createPullRequest(env, fullName, base, files, task, summary) {
+  const { owner, repo } = repoConfig(env, fullName);
+  const branch = `ai-council/${slugify(task)}-${Date.now().toString(36)}`;
+
+  const baseRef = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(base)}`
+  );
+  const baseSha = baseRef?.object?.sha;
+  if (!baseSha) throw new Error("讀不到 base branch SHA");
+
+  const commit = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits/${encodeURIComponent(baseSha)}`
+  );
+  const treeSha = commit?.tree?.sha;
+  if (!treeSha) throw new Error("讀不到 base tree");
+
+  const treeItems = [];
+  // GitHub 建議避免短時間大量 mutation；這裡逐個建立 blob。
+  for (const file of files) {
+    const blob = await githubRequest(
+      env,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content: file.content, encoding: "utf-8" }),
+      }
+    );
+    treeItems.push({ path: file.path, mode: "100644", type: "blob", sha: blob.sha });
+  }
+
+  const tree = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`,
+    {
+      method: "POST",
+      body: JSON.stringify({ base_tree: treeSha, tree: treeItems }),
+    }
+  );
+
+  const newCommit = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message: `AI Council: ${String(summary || "工程修正").slice(0, 120)}`,
+        tree: tree.sha,
+        parents: [baseSha],
+      }),
+    }
+  );
+
+  await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: newCommit.sha }),
+    }
+  );
+
+  const pr = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        title: `AI Council：${String(summary || "工程修正").slice(0, 180)}`,
+        head: branch,
+        base,
+        body: [
+          "## AI Council 工程模式",
+          "",
+          `任務：${task}`,
+          "",
+          `AI 最終摘要：${summary || "（無摘要）"}`,
+          "",
+          "### 修改檔案",
+          ...files.map(f => `- \`${f.path}\``),
+          "",
+          "本 PR 由 AI 圓桌建立；不會自動 merge，請人工檢查 diff 與測試結果後再決定是否合併。",
+        ].join("\n"),
+        draft: true,
+        maintainer_can_modify: false,
+      }),
+    }
+  );
+
+  return { branch, commitSha: newCommit.sha, pr };
+}
+
+export async function listGitHubRepos(env) {
+  const data = await githubRequest(
+    env,
+    "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=updated&direction=desc"
+  );
+  return (Array.isArray(data) ? data : [])
+    .filter(x => x?.full_name)
+    .map(x => ({
+      fullName: x.full_name,
+      name: x.name,
+      private: Boolean(x.private),
+      defaultBranch: x.default_branch || "main",
+      permissions: x.permissions || {},
+    }));
+}
+
+export async function runGitHubEngineering(env, { repoFullName, base, task }) {
+  const { fullName } = repoConfig(env, repoFullName);
+  const safeBase = String(base || "main").trim();
+  if (!/^[A-Za-z0-9._/-]{1,120}$/.test(safeBase) || safeBase.includes("..") || safeBase.startsWith("/")) {
+    throw new Error("base branch 名稱不合法");
+  }
+
+  const question = String(task || "").trim();
+  if (!question || question.length > MAX_TASK_CHARS) throw new Error("工程任務不可為空，且最多 4000 字元");
+
+  const snapshot = await fetchRepoFiles(env, fullName, safeBase);
+  const originalMap = new Map(snapshot.files.map(f => [f.path, f.content]));
+
+  const result = await runEngineeringCouncil({
+    env,
+    question:
+      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。`,
+    rawFiles: snapshot.files,
+    rawImages: [],
+    webSearch: false,
+  });
+
+  const proposed = validateProposedFiles(result?.artifact?.files, originalMap);
+  if (!proposed.length) {
+    return {
+      ok: true,
+      action: "no_changes",
+      repository: fullName,
+      base: safeBase,
+      scannedFiles: snapshot.files.map(f => f.path),
+      a: result.a,
+      b: result.b,
+      final: result.final,
+      artifact: result.artifact || null,
+    };
+  }
+
+  const prResult = await createPullRequest(
+    env,
+    fullName,
+    safeBase,
+    proposed,
+    question,
+    result?.artifact?.summary || "AI 圓桌工程修正"
+  );
+
+  return {
+    ok: true,
+    action: "pull_request",
+    repository: fullName,
+    base: safeBase,
+    branch: prResult.branch,
+    commitSha: prResult.commitSha,
+    pr: {
+      number: prResult.pr?.number || null,
+      url: prResult.pr?.html_url || null,
+      title: prResult.pr?.title || null,
+      draft: Boolean(prResult.pr?.draft),
+    },
+    scannedFiles: snapshot.files.map(f => f.path),
+    changedFiles: proposed.map(f => f.path),
+    a: result.a,
+    b: result.b,
+    final: result.final,
+    artifact: result.artifact || null,
+  };
+}
+
+export async function handleGitHubEngineering(request, env) {
+  try {
+    const body = await readJsonBody(request);
+    const result = await runGitHubEngineering(env, {
+      repoFullName: body?.repoFullName,
+      base: body?.base,
+      task: body?.task,
+    });
+    return json(result);
+  } catch (e) {
+    console.error("GitHub 工程模式失敗：", e?.message || e);
+    return json({
+      ok: false,
+      error: e?.status === 413 ? "請求內容太大" : e?.status === 400 ? "請求格式錯誤" : String(e?.message || "").includes("GITHUB_TOKEN") ? "GitHub 尚未完成設定" : "GitHub 工程模式執行失敗，請稍後再試",
+    }, e?.status === 413 ? 413 : e?.status === 400 ? 400 : 500);
+  }
+}
+
+export async function handleGitHubRepos(request, env) {
+  if (request.method !== "GET") return json({ ok: false, error: "Method Not Allowed" }, 405);
+  try {
+    const repos = await listGitHubRepos(env);
+    return json({ ok: true, repos });
+  } catch (e) {
+    console.error("GitHub repository 清單讀取失敗：", e?.message || e);
+    return json({ ok: false, error: "GitHub repository 清單暫時無法取得" }, 500);
+  }
+}
