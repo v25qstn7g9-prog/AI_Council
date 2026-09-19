@@ -148,6 +148,65 @@ wrangler deploy
 
 開啟 `https://你的-worker.workers.dev/usage` 可看到 JSON：今日額度、已使用 Neurons、剩餘 Neurons、使用率與下一次重置時間。
 
+
+## 🐙 GitHub 工程模式
+
+v3.11 起，AI 圓桌可以直接讀取你授權的 GitHub repository，讓 AI A 主工程師與 AI B Reviewer 以 **GitHub branch 上的實際原始碼**進行討論與修改。
+
+### 使用方式
+
+1. 設定 GitHub Fine-grained Personal Access Token（建議只授權需要操作的 repositories）。
+2. Repository permissions 至少：
+   - **Contents：Read and write**
+   - **Pull requests：Read and write**
+   - **Metadata：Read**
+3. 設定：
+   ```bash
+   wrangler secret put GITHUB_TOKEN
+   ```
+4. `wrangler.jsonc`：
+   - `GITHUB_OWNER`：GitHub 帳號
+   - `GITHUB_ALLOWED_REPOS`：可填 `*` 使用 Token 本身可存取的 repository，或以逗號列出白名單。
+5. 開啟畫面的「🐙 GitHub 工程模式」，選 repository 與 base branch，直接輸入工程任務。
+
+### 寫入安全設計
+
+GitHub 工程模式**不直接修改 main**：
+
+```
+讀取 base branch
+    ↓
+AI A 主工程師
+    ↓
+AI B Reviewer
+    ↓
+Final Integrator
+    ↓
+安全驗證修改檔案
+    ↓
+建立 ai-council/* branch
+    ↓
+commit
+    ↓
+建立 Draft Pull Request
+    ↓
+人工審核 / 測試 / Merge
+```
+
+目前禁止 AI 寫入：
+- `.env` / secrets
+- `.github/workflows/`
+- `node_modules/`、`dist/`、`build/`
+- 其他被列入保護清單的路徑
+
+AI 只會提交與原始 snapshot 不同、且通過路徑驗證的完整檔案內容。GitHub Token 永遠只存在 Worker Secret，不會送進 AI prompt。
+
+GitHub REST API 的 branch、Git tree/blob 與 Pull Request 流程均採官方 API；Pull Request 預設建立為 Draft，不會自動 Merge。citeturn0search2turn0search10turn0search0
+
+### Rate Limit
+
+GitHub REST API 有主要與 secondary rate limits，因此工程模式讀取檔案採受控數量與串行請求，避免短時間大量 API 呼叫。citeturn3search0turn3search4
+
 ## 自我健檢（AI 圓桌審查自己的原始碼）
 
 這個功能讓 AI 圓桌定期（或手動）拿自己的原始碼當「案子」，跑一次跟平常一樣的 A 主工程師 → B Reviewer → 最終整合流程，把結果做成 GitHub Pull Request 或 Issue。
