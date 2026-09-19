@@ -1,4 +1,4 @@
-# AI 圓桌 v4.4.0｜Deterministic Rescue Audit
+# AI 圓桌 v4.4.0｜Direct Evidence Synthesis
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
