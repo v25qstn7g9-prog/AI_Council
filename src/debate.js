@@ -13,15 +13,15 @@
  * }
  */
 
-const VERSION = "3.13.0";
+const VERSION = "3.14.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const MAX_Q = 4000;
 const MAX_FILES = 30;
-const MAX_FILE_CHARS = 60000;
-const MAX_TOTAL_FILE_CHARS = 240000;
+const MAX_FILE_CHARS = 120000;
+const MAX_TOTAL_FILE_CHARS = 360000;
 const MAX_IMAGES = 4;
 const MAX_RESCUE_FILES = 5;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
@@ -469,10 +469,14 @@ export async function runEngineeringCouncil({ env, question, rawFiles, rawImages
     images.map(image => analyzeImage(env.AI, image))
   );
 
-  const projectContext = buildProjectContext(files, imageReports, analysisOnly
-    ? { maxTotalChars: 120000, maxFileChars: 24000 }
+  // Full Repo Audit：主審查不再套用舊版 120k/24k 的隱藏縮限。
+  // normalizeFiles 已先做 360k/120k 的安全上限；這裡沿用同一預算，
+  // 確保 GitHub 已完整讀入的檔案不會在送進 AI A 前再次被截斷。
+  const projectContextInfo = buildProjectContext(files, imageReports, analysisOnly
+    ? { maxTotalChars: MAX_TOTAL_FILE_CHARS, maxFileChars: MAX_FILE_CHARS }
     : undefined
-  ).text;
+  );
+  const projectContext = projectContextInfo.text;
   const searchNote = search.used && search.text
     ? `\n\n【Web Search 資料】\n${search.text}`
     : "";
