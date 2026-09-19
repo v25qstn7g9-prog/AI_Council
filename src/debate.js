@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.7.0";
+const VERSION = "4.7.1";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
@@ -35,6 +35,8 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 const PRIMARY_TIMEOUT_MS = 12000;
 const FALLBACK_TIMEOUT_MS = 60000;
 const AUDIT_BATCH_TIMEOUT_MS = 30000;
+const AUDIT_BATCH_RETRY_TIMEOUT_MS = 45000;
+const AUDIT_C_TIMEOUT_MS = 75000;
 
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -542,14 +544,36 @@ ${context}
 4. 跨批次衝突或證據不足一律放待驗證。
 5. 必須明確寫 Audit Coverage ${coverageText}。
 6. 不得修改程式碼。`;
-  const r=await askC(env.AI,env,[{role:"system",content:"你是獨立的 AI C 證據裁決者。只整合 AI A 與 AI B 的批次證據，不新增事實；有衝突時降級為待驗證。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
-  const report=String(r.text||"").trim();
-  const sectionCount=(report.match(/^##\\s+/gm)||[]).length;
-  // v4.4：完整度以報告結構為主，不再用 1200 字的任意長度門檻誤殺精簡但完整的報告。
   const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","最終結論"];
-  const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
-  const complete=report.length>=500 && sectionCount>=10 && headingHits>=9;
-  return {complete,report,source:r.source,debug:r.debug,sectionCount,headingHits,length:report.length};
+  const inspect=(value)=>{
+    const report=String(value||"").trim();
+    const sectionCount=(report.match(/^##\\s+/gm)||[]).length;
+    const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
+    return {complete:report.length>=500&&sectionCount>=10&&headingHits>=9,report,sectionCount,headingHits,length:report.length};
+  };
+  const messages=[
+    {role:"system",content:"你是獨立的 AI C 證據裁決者。只整合 AI A 與 AI B 的批次證據，不新增事實；有衝突時降級為待驗證。"},
+    {role:"user",content:prompt}
+  ];
+  let best=inspect("");
+  let source="unavailable";
+  const diagnostics=[];
+  for (let attempt=1;attempt<=2;attempt++) {
+    try {
+      const retryNote=attempt===2
+        ? "\n\n這是第二次且最後一次產生報告。必須直接寫出至少 12 個具有實質內容的 ## 章節，不可只回標題、前言或 JSON。"
+        : "";
+      const r=await askC(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?5500:4500,0.05,AUDIT_C_TIMEOUT_MS);
+      source=r.source;
+      const checked=inspect(r.text);
+      diagnostics.push(`AI C attempt ${attempt}: ${checked.length} chars / ${checked.sectionCount} sections / ${checked.headingHits} headings`);
+      if (checked.length>best.length) best=checked;
+      if (checked.complete) return {...checked,source,debug:[r.debug,...diagnostics].filter(Boolean).join("；"),attempts:attempt};
+    } catch (error) {
+      diagnostics.push(`AI C attempt ${attempt}: ${sanitizeInternalError(error)}`);
+    }
+  }
+  return {...best,source,debug:diagnostics.join("；"),attempts:2};
 
 }
 
@@ -579,10 +603,22 @@ ${context || "（無檔案）"}
   ];
   // v4.6：每批真正同時交給 A 與 B。批次間仍維持 concurrency=1，
   // 避免多批一起轟炸 provider；同批 A/B 並行可把整體等待控制在前端時限內。
-  const [aSettled,bSettled]=await Promise.allSettled([
+  let [aSettled,bSettled]=await Promise.allSettled([
     askA(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
     askB(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
   ]);
+  let retried=false;
+  if (aSettled.status!=="fulfilled"&&bSettled.status!=="fulfilled") {
+    retried=true;
+    const retryMessages=[
+      {role:"system",content:"你是大型 repository 的批次 Code Review 工程師。這是服務失敗後的最後重試；只根據完整可見原始碼建立精簡證據。"},
+      {role:"user",content:prompt+"\n\n請精簡在 1000 字內完成，避免只輸出標題。"}
+    ];
+    try { aSettled={status:"fulfilled",value:await askA(env.AI,env,retryMessages,1400,0.05,AUDIT_BATCH_RETRY_TIMEOUT_MS)}; }
+    catch (error) { aSettled={status:"rejected",reason:error}; }
+    try { bSettled={status:"fulfilled",value:await askB(env.AI,env,retryMessages,1400,0.05,AUDIT_BATCH_RETRY_TIMEOUT_MS)}; }
+    catch (error) { bSettled={status:"rejected",reason:error}; }
+  }
   const aOk=aSettled.status==="fulfilled";
   const bOk=bSettled.status==="fulfilled";
   if (!aOk&&!bOk) {
@@ -598,6 +634,7 @@ ${context || "（無檔案）"}
     aOk,bOk,
     aSource:aOk?aSettled.value.source:"unavailable",
     bSource:bOk?bSettled.value.source:"unavailable",
+    retried,
     filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
   };
 }
