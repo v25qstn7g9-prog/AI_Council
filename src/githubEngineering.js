@@ -401,6 +401,41 @@ export function buildDeterministicAuditReport({fullName,base,question,findings,c
   ].join("\n\n");
 }
 
+export function scanDeterministicIntegrityFindings(files) {
+  const findings=[];
+  for (const file of Array.isArray(files)?files:[]) {
+    const path=String(file?.path||"");
+    const content=String(file?.content||"");
+    const lines=content.split("\n");
+    const first=String(lines.find(x=>x.trim())||"").trim().slice(0,160);
+    const last=String([...lines].reverse().find(x=>x.trim())||"").trim().slice(0,160);
+    if (path.toLowerCase()==="index.html") {
+      const missing=[];
+      if (!/<!doctype\s+html/i.test(content)) missing.push("DOCTYPE");
+      if (!/<html(?:\s|>)/i.test(content)||!/<\/html\s*>/i.test(content)) missing.push("html root");
+      if (!/<body(?:\s|>)/i.test(content)||!/<\/body\s*>/i.test(content)) missing.push("body root");
+      if (missing.length) findings.push({
+        id:"HTML_ROOT_INCOMPLETE",severity:"critical",path,
+        title:"根 index.html 缺少完整 HTML 文件結構",
+        evidence:`完整 GitHub blob 共 ${lines.length} 行 / ${content.length} 字元；缺少 ${missing.join(", ")}；首個非空白行：${first||"(empty)"}；最後非空白行：${last||"(empty)"}`
+      });
+    }
+    if (/function\s*\(\)\s*\{\s*\[native code\]\s*\}/.test(content)) findings.push({
+      id:"NATIVE_CODE_LITERAL",severity:"critical",path,
+      title:"原生函式字串被寫入程式碼常值",
+      evidence:"完整 GitHub blob 內直接出現 function () { [native code] }；若用於日期字串，會形成 Invalid Date 並使驗證失敗。"
+    });
+  }
+  return findings;
+}
+
+function deterministicIntegrityEvidence(findings) {
+  return {
+    path:"01-deterministic-integrity-findings.md",truncated:false,size:0,
+    content:["# Deterministic Integrity Findings","以下證據由本地程式直接掃描完整 GitHub blob 產生；AI C 必須逐項保留 finding ID。",...(findings.length?findings.flatMap(x=>[`## [${x.id}] ${x.title}`,`- Severity: ${x.severity}`,`- File: ${x.path}`,`- Evidence: ${x.evidence}`]):["- none"])].join("\n")
+  };
+}
+
 function reportList(values, empty="- 無") {
   const items=(Array.isArray(values)?values:[]).map(x=>String(x||"").trim()).filter(Boolean);
   return items.length ? items.map(x=>`- ${x}`).join("\n") : empty;
@@ -472,6 +507,7 @@ function ensureRequestedEngineeringReport(response, task, requested) {
 
 async function runFullRepoBatchAudit(env, fullName, base, question) {
   const snapshot=await fetchFullRepoAuditFiles(env,fullName,base);
+  const deterministicFindings=scanDeterministicIntegrityFindings(snapshot.files);
   const plan=planAuditBatches(snapshot.files);
   const findings=[];
   const reviewedPaths=[];
@@ -564,7 +600,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       `AI C Emergency Coverage: ${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`,
       `Batch count: ${plan.batches.length}`,
       "Reviewed files:",
-      ...reviewedPaths.map(p=>`- ${p}`),
+      ...snapshot.files.map(f=>`- ${f.path} | Source complete: yes | Lines: ${String(f.content||"").split("\n").length} | Chars: ${String(f.content||"").length}`),
       "Unreviewed/skipped files:",
       ...(coverage.skipped.length?coverage.skipped.map(p=>`- ${p}`):["- none"])
     ].join("\n")
@@ -577,8 +613,9 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     primary=await synthesizeAuditEvidence({
       env,
       question,
-      rawFiles:[manifest,...findings],
+      rawFiles:[manifest,deterministicIntegrityEvidence(deterministicFindings),...findings],
       coverage,
+      requiredFindings:deterministicFindings,
     });
   } catch {
     primary={
@@ -588,7 +625,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.8.1",
+    version:"4.9.0",
     a:aReport,
     b:bReport,
     c:primary.report||"",
@@ -612,7 +649,8 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisDebug:primary.debug||"",
       cCompleted:Boolean(primary.complete),
       cEmergencyReviewedFiles:cEmergencyReviewedPaths,
-      pipelineVersion:"full-repo-abc-evidence-v4.8.1",
+      deterministicFindings,
+      pipelineVersion:"full-repo-abc-evidence-v4.9",
       aReviewedFiles:aReviewedPaths,
       bReviewedFiles:bReviewedPaths,
     }
@@ -625,7 +663,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     const rescueBase=buildDeterministicAuditReport({
       fullName,base,question,findings,coverage
     });
-    const rescueReport=[rescueBase,"## 14. Pipeline 診斷",`Pipeline：full-repo-abc-evidence-v4.8.1`,`AI C 完成：否`,`AI C 嘗試次數：${primary.attempts||2}`,`AI C 最後來源：${primary.source||"unavailable"}`,`AI C 診斷：${primary.debug||"未提供"}`,`AI A Coverage：${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI B Coverage：${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI C 緊急批次 Coverage：${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`].join("\n\n");
+    const rescueReport=[rescueBase,"## 14. Pipeline 診斷",`Pipeline：full-repo-abc-evidence-v4.9`,`AI C 完成：否`,`AI C 嘗試次數：${primary.attempts||2}`,`AI C 最後來源：${primary.source||"unavailable"}`,`AI C 診斷：${primary.debug||"未提供"}`,`Deterministic Findings：${deterministicFindings.map(x=>x.id).join(", ")||"none"}`,`AI A Coverage：${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI B Coverage：${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI C 緊急批次 Coverage：${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`].join("\n\n");
     finalResult.c="AI C 未完成證據裁決；以下最終報告為本地確定性降級證據包，不能視為 C 層判決。";
     finalResult.final=rescueReport;
     finalResult.artifact={
@@ -638,7 +676,8 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       deterministicRescue:true,
       rescueLength:rescueReport.length,
       cCompleted:false,
-      pipelineVersion:"full-repo-abc-evidence-v4.8.1",
+      deterministicFindings,
+      pipelineVersion:"full-repo-abc-evidence-v4.9",
     };
   }
 
@@ -888,7 +927,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       c:audit.result.c,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.8.1",
+      version:audit.result.version||"4.9.0",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
