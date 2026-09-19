@@ -302,29 +302,45 @@ function renderArtifact(artifact){
   let reportActions=null;
   if(typeof artifact.report==="string"&&artifact.report.trim()){
     lines.push(artifact.report.trim());
-    const reportActions=document.createElement("div");
+    reportActions=document.createElement("div");
     reportActions.className="outputActions";
     const reportBtn=document.createElement("button");
     reportBtn.type="button";
     reportBtn.textContent="下載完整工程報告（Markdown）";
-    reportBtn.onclick=()=>{
-      const blob=new Blob([artifact.report.trim()+"\n"],{type:"text/markdown;charset=utf-8"});
+    reportBtn.onclick=async()=>{
+      const filename="AI-Council-engineering-report.md";
+      const text=artifact.report.trim()+"\n";
+      const blob=new Blob([text],{type:"text/markdown;charset=utf-8"});
+      try{
+        const isIOS=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(
+          navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1
+        );
+        if(isIOS&&navigator.share&&typeof File==="function"){
+          const file=new File([blob],filename,{type:"text/markdown"});
+          if(!navigator.canShare||navigator.canShare({files:[file]})){
+            await navigator.share({title:"AI Council 工程 Audit Report",files:[file]});
+            return;
+          }
+        }
+      }catch(err){
+        if(err?.name==="AbortError")return;
+      }
       const url=URL.createObjectURL(blob);
       const a=document.createElement("a");
       a.href=url;
-      a.download="AI-Council-engineering-report.md";
+      a.download=filename;
+      a.rel="noopener";
       a.style.display="none";
       document.body.append(a);
       a.click();
       a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
     };
     reportActions.append(reportBtn);
     const reportHint=document.createElement("div");
     reportHint.className="small";
     reportHint.textContent="可直接把這份 Markdown 報告交給另一個 AI 做第二層獨立審查。";
     reportActions.append(reportHint);
-    reportActions=reportActions;
   }
   if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
   if(Array.isArray(artifact.verified)&&artifact.verified.length)lines.push("已證實：\n- "+artifact.verified.join("\n- "));
