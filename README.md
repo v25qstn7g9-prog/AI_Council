@@ -1,6 +1,10 @@
-# AI 圓桌 v4.0.0｜Batch Full Repo Audit
+# AI 圓桌 v4.1.0｜Verified Fix Pipeline
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.1.0：Verified Fix Pipeline
+
+修改模式新增 Fix Direction Gate：先由 AI A 根據完整相關原始碼提出根因、原設計意圖、最多三個方案、scopeFiles 與 successCriteria，再由 AI B 以反方 Reviewer 檢查錯誤假設、副作用與回歸風險。只有高信心且 Reviewer 未否決的方向才能進入實作。實作後再經 Mechanical Fix Gate（限制 scope、保留既有函式、阻擋過大改寫與截斷內容）及 Before/After Regression Review；任一 Gate 不通過即停止，不建立 PR。
 
 ## v4.0.0：Batch Full Repo Audit
 
