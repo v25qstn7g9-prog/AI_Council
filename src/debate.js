@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.5.1";
+const VERSION = "4.5.2";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
