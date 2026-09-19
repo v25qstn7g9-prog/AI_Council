@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.1.0";
+const VERSION = "4.2.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -622,6 +622,8 @@ ${a}
 - 是否把「推測 / 待驗證」誤寫成「已證實」
 - 是否存在日期不符、來源過舊、數字對不上、把上漲寫成下跌等問題
 - 若來源不足，必須要求降級成「待驗證」，不可硬下結論
+- 【硬規則】如果你看到 [TRUNCATED]，那只代表 Reviewer 收到的審查副本被 context budget 截斷，不代表 GitHub 原始檔被截斷。不得因此寫「檔案損壞／必修／無法編譯／直接部署會失敗」。只能要求用完整原始檔重新驗證。
+- 只有「本輪完整原始碼」中的直接證據或明確執行錯誤，才能支撐 Must Fix。
 最後給出「必修 / 建議 / 不要改」三區。`;
 
   const bResult = await askB(env.AI, env, [
@@ -759,16 +761,20 @@ ${auditEvidenceManifest}
       }
     }
 
-    // 最後防線：絕不把只有標題的內容當成「報告成功」提供下載。
+    // 最後防線：最終稿不完整時，不再把互相矛盾的 A/B 原文包裝成 Audit Report。
+    // A/B 是意見而非證據；失敗應明確回報，交由 GitHub Full Repo 流程以完整檔案重試。
+    let reportGenerationFailed = false;
     if (!reportLooksComplete(report)) {
-      const fallbackSections = [
-        "# AI Council 工程 Audit Report",
-        "## 1. 執行摘要\n完整報告模型未能產生足夠長度的最終稿；以下保留雙 AI 已完成的實際審查內容，避免下載到只有標題的空報告。",
-        "## 2. AI A 主工程師審查\n" + a,
-        "## 3. AI B Reviewer 審查\n" + b,
-        "## 4. 待驗證事項\n最終 Audit Lead 未產生符合完整度門檻的報告；請依上方 A/B 證據進行後續人工或第二層 AI 審查。"
-      ];
-      report = fallbackSections.join("\n\n");
+      reportGenerationFailed = true;
+      report = [
+        "# AI Council Audit 未完成",
+        "## 狀態",
+        "最終 Audit Lead 未產生符合完整度門檻的報告。本次結果不視為完整 Audit Report。",
+        "## 證據安全",
+        "AI A / AI B 的文字僅為待核對意見，不會在報告生成失敗時被升格為已證實問題或 Must Fix。",
+        "## 下一步",
+        "請由 Full Repository Audit 流程使用完整 GitHub 原始檔重新驗證；任何 Reviewer context 的 [TRUNCATED] 都只代表審查副本被截斷，不代表 repository 原始檔損壞。"
+      ].join("\n\n");
     }
 
     const summary = report.split(/\n\s*##\s+/)[0].slice(0, 1600);
@@ -779,11 +785,11 @@ ${auditEvidenceManifest}
       report,
       verified:[],
       inferences:[],
-      pending:[],
+      pending: reportGenerationFailed ? ["完整 Audit Report 生成失敗；不得依 A/B 原文直接修改程式。"] : [],
       review:[],
-      instructions: report
-        ? ["已產生完整工程 Audit Report，可使用下載按鈕交給另一個 AI 做第二層獨立審查。"]
-        : ["AI 沒有回傳完整報告，請稍後重試。"],
+      instructions: reportGenerationFailed
+        ? ["請重新執行 Full Repository Audit；系統應以完整 GitHub 原始檔重新驗證。"]
+        : ["已產生完整工程 Audit Report，可使用下載按鈕交給另一個 AI 做第二層獨立審查。"],
       sources:[],
       files:[],
     };
@@ -800,6 +806,7 @@ ${auditEvidenceManifest}
       reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
       reportRequested:true,
       reportOnly:true,
+      reportGenerationFailed,
       imageReports,
       webSearchRequested,
       search:{
