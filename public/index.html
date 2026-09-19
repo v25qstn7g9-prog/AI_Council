@@ -503,14 +503,21 @@ async function run(){
         // 下載檔也至少保留本次 AI A / AI B 的實際審查內容。
         if(typeof d.artifact.report==="string"){
           const reportText=d.artifact.report.trim();
-          const sectionCount=(reportText.match(/^##\\s+/gm)||[]).length;
-          if(reportText.length<1200||sectionCount<6){
+          const finalText=typeof d.final==="string"?d.final.trim():"";
+          const countSections=(text)=>(String(text||"").match(/^##\\s+/gm)||[]).length;
+          const looksComplete=(text)=>String(text||"").trim().length>=1200&&countSections(text)>=6;
+
+          // artifact.report 偶爾只帶回標題，但 d.final 已經是完整 Audit Report。
+          // 先採用真正完整的 final，只有兩者都不完整時才組 fallback。
+          if(!looksComplete(reportText)&&looksComplete(finalText)){
+            d.artifact.report=finalText;
+          }else if(!looksComplete(reportText)){
             d.artifact.report=[
               "# AI Council 工程 Audit Report",
               "## 1. 報告產生狀態\\n最終 Audit Report 回傳內容不完整；以下自動保留本次雙 AI 實際審查結果，避免下載到只有標題的空報告。",
               "## 2. AI A · 主工程師審查\\n"+(d.a||"（無內容）"),
               "## 3. AI B · Reviewer 審查\\n"+(d.b||"（無內容）"),
-              "## 4. 最終整合原始回覆\\n"+(d.final||reportText||"（無內容）"),
+              "## 4. 最終整合原始回覆\\n"+(finalText||reportText||"（無內容）"),
               "## 5. 待驗證事項\\n後端完整報告生成未達完整度門檻，需依上方雙 AI 證據進一步核對。",
               "## 6. 結論\\n本檔保留本次實際工程審查內容，不將只有標題的輸出視為完整 Audit Report。"
             ].join("\\n\\n");
