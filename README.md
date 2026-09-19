@@ -1,6 +1,10 @@
-# AI 圓桌 v4.7.1｜Reliable ABC Three-Layer Audit
+# AI 圓桌 v4.8.0｜Tested ABC Three-Layer Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.8.0：Tested ABC Audit
+
+Audit C 主模型改為 Cloudflare Llama 3.3 70B Fast，Mistral Small 3.1 改為第二備援，若已設定 Gemini 則作為第三備援。A/B 整批失敗時，C 會先保存該批完整檔案證據再進行最終裁決；下載的降級報告會列出 C 的模型來源、嘗試次數、錯誤分類及 A/B/C Coverage。新增 mock AI 自動測試，覆蓋 C 主模型成功、C 模型備援與 A/B 失敗重試。
 
 ## v4.7.1：Reliable AI C Audit
 
