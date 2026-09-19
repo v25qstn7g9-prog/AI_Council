@@ -5,7 +5,7 @@
  * 最後只建立新 branch + Pull Request，不直接修改 base branch。
  */
 
-import { runEngineeringCouncil, runAuditBatch } from "./debate.js";
+import { runEngineeringCouncil, runAuditBatch, runFixDirectionReview, runPostFixReview } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
@@ -456,6 +456,31 @@ function validateProposedFiles(proposed, originalMap, task = "") {
   return out;
 }
 
+function changedLineRatio(before, after) {
+  const a=String(before||"").split("\n"), b=String(after||"").split("\n");
+  const max=Math.max(a.length,b.length,1), min=Math.min(a.length,b.length);
+  let same=0; for(let i=0;i<min;i+=1) if(a[i]===b[i]) same+=1;
+  return 1-(same/max);
+}
+
+function mechanicalFixGate(proposed, originalMap, allowedScope) {
+  const allowed=new Set((allowedScope||[]).map(safePath).filter(Boolean));
+  const checks=[];
+  for(const file of proposed) {
+    const before=originalMap.get(file.path)||"";
+    if(allowed.size&&!allowed.has(file.path)) return {ok:false,reason:`修改超出核准範圍：${file.path}`,checks};
+    if(!before) return {ok:false,reason:`缺少修改前檔案：${file.path}`,checks};
+    if(/\[TRUNCATED\]/.test(file.content)) return {ok:false,reason:`修改後含截斷標記：${file.path}`,checks};
+    const beforeFns=extractFunctionNames(before), afterFns=extractFunctionNames(file.content);
+    const missing=[...beforeFns].filter(x=>!afterFns.has(x));
+    if(missing.length) return {ok:false,reason:`既有函式消失：${file.path} -> ${missing.join(", ")}`,checks};
+    const ratio=changedLineRatio(before,file.content);
+    if(ratio>0.35) return {ok:false,reason:`修改範圍過大：${file.path} (${Math.round(ratio*100)}%)`,checks};
+    checks.push({path:file.path,changedRatio:Math.round(ratio*1000)/10,functionsPreserved:true});
+  }
+  return {ok:true,checks};
+}
+
 function slugify(text) {
   const s = String(text || "")
     .toLowerCase()
@@ -610,10 +635,22 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const snapshot = await fetchRepoFiles(env, fullName, safeBase);
   const originalMap = new Map(snapshot.files.map(f => [f.path, f.content]));
 
+  let fixDirection=null;
+  if (!analysisOnly && modificationRequested) {
+    const directionReview=await runFixDirectionReview({env,task:question,rawFiles:snapshot.files,finding:question});
+    if (!directionReview.approved) {
+      return {ok:true,action:"direction_not_approved",repository:fullName,base:safeBase,
+        scannedFiles:snapshot.files.map(f=>f.path),fixDirection:directionReview,
+        final:"修正方向尚未通過 Verified Fix Direction Gate，因此沒有修改檔案或建立 PR。",
+        artifact:{summary:"修正方向未核准",rootCause:directionReview.direction?.rootCause||"",verified:[],inferences:[],pending:directionReview.direction?.pending||[],review:[directionReview.reviewer],instructions:["補足證據或縮小修正範圍後再執行"],files:[]}};
+    }
+    fixDirection=directionReview;
+  }
+
   const result = await runEngineeringCouncil({
     env,
     question:
-      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
+      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}${fixDirection ? `\n\n【已核准 Fix Direction】\n${JSON.stringify(fixDirection.direction)}\n只能依 scopeFiles 與 recommended 方案修改，不得自行換方案或擴大範圍。` : ""}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
     rawFiles: snapshot.files,
     rawImages: [],
     webSearch: false,
@@ -622,6 +659,15 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   });
 
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
+  if (!analysisOnly && proposed.length && fixDirection) {
+    const mechanical=mechanicalFixGate(proposed,originalMap,fixDirection.direction?.scopeFiles||[]);
+    if(!mechanical.ok) return {ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),fixDirection,verification:mechanical,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null};
+    const afterFiles=proposed.map(f=>({path:f.path,content:f.content,truncated:false}));
+    const beforeFiles=proposed.map(f=>({path:f.path,content:originalMap.get(f.path),truncated:false}));
+    const post=await runPostFixReview({env,task:question,beforeFiles,afterFiles,direction:fixDirection.direction});
+    if(!post.approved) return {ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),fixDirection,verification:{mechanical,post},final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null};
+    result.fixVerification={mechanical,post};
+  }
   if (analysisOnly || !proposed.length) {
     return {
       ok: true,
@@ -660,6 +706,8 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     },
     scannedFiles: snapshot.files.map(f => f.path),
     changedFiles: proposed.map(f => f.path),
+    fixDirection: fixDirection || null,
+    fixVerification: result.fixVerification || null,
     a: result.a,
     b: result.b,
     final: result.final,
