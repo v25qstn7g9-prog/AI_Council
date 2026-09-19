@@ -1,6 +1,10 @@
-# AI 圓桌 v4.5.3｜Reliable Batch Audit
+# AI 圓桌 v4.6.0｜Dual AI Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.6.0：Dual AI Audit
+
+Full Repo Audit 的每一批現在會真正同時交給 AI A 與 AI B 獨立審查，兩份結果分別回傳到「AI A・主工程師」與「AI B・Reviewer」卡片，並一起進入最終證據整合。批次間維持單工以控制 provider 壓力；同一批 A/B 並行以控制總等待時間。任一模型個別失敗時會在對應卡片明確顯示，另一模型的有效結果仍可保留；兩者都失敗才把該批列為未審查。
 
 ## v4.5.3：Reliable Batch Audit
 
