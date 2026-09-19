@@ -21,18 +21,21 @@ async function readSecret(env, name) {
 }
 
 /**
- * 防範時序攻擊 (Timing Attacks) 的常數時間比對函數
+ * 防範時序攻擊 (Timing Attacks) 的常數時間比對函數。
+ * 使用固定長度 SHA-256 摘要，避免依賴 Node.js 專用 timingSafeEqual。
  */
 async function safeCompare(a, b) {
   if (typeof a !== "string" || typeof b !== "string") return false;
   const encoder = new TextEncoder();
-  // 先雜湊成固定 32-byte 長度，再做 constant-time compare，
-  // 避免因原始 token 長度不同而在比較前提前返回。
   const [aHash, bHash] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(a)),
     crypto.subtle.digest("SHA-256", encoder.encode(b)),
   ]);
-  return crypto.subtle.timingSafeEqual(new Uint8Array(aHash), new Uint8Array(bHash));
+  const left = new Uint8Array(aHash);
+  const right = new Uint8Array(bHash);
+  let difference = 0;
+  for (let i = 0; i < left.length; i += 1) difference |= left[i] ^ right[i];
+  return difference === 0;
 }
 
 async function checkSelfReviewRateLimit(env) {
@@ -70,6 +73,7 @@ async function handleSelfReviewRequest(request, env) {
     const result = await runSelfReview(env);
     return json(result);
   } catch (e) {
+    console.error("AI 圓桌自我健檢（手動）失敗：", e?.message || e);
     return json({ ok: false, error: "自我健檢執行失敗，請稍後再試" }, 500);
   }
 }
@@ -86,7 +90,7 @@ export default {
       return usageHandler({ request, env, ctx });
     }
 
-    if (url.pathname === "/self-review" && (request.method === "POST" || request.method === "GET")) {
+    if (url.pathname === "/self-review" && request.method === "POST") {
       return handleSelfReviewRequest(request, env);
     }
 
