@@ -407,7 +407,9 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       files:[],
       synthesisSource:primary.source,
       synthesisSections:primary.sectionCount,
+      synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
+      pipelineVersion:"full-repo-evidence-v4.4",
     }
   };
 
@@ -431,6 +433,10 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
         instructions:["已由完整批次證據重新合成 Audit Report。"],
         rescuedFromReportFailure:true,
         rescueSource:rescue.source,
+        rescueSections:rescue.sectionCount,
+        rescueHeadingHits:rescue.headingHits,
+        rescueLength:rescue.length,
+        pipelineVersion:"full-repo-evidence-v4.4",
       };
     } else {
       finalResult.final=[
@@ -446,6 +452,10 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
         finalResult.artifact.report=finalResult.final;
         finalResult.artifact.pending=["Primary Report 與 Evidence Rescue 均未完成。"];
         finalResult.artifact.rescueFailed=true;
+        finalResult.artifact.rescueSections=rescue.sectionCount;
+        finalResult.artifact.rescueHeadingHits=rescue.headingHits;
+        finalResult.artifact.rescueLength=rescue.length;
+        finalResult.artifact.pipelineVersion="full-repo-evidence-v4.4";
       }
     }
   }
