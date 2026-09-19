@@ -9,9 +9,9 @@ import { runEngineeringCouncil } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
-const MAX_FILES = 18;
-const MAX_FILE_CHARS = 24000;
-const MAX_TOTAL_FILE_CHARS = 120000;
+const MAX_FILES = 30;
+const MAX_FILE_CHARS = 60000;
+const MAX_TOTAL_FILE_CHARS = 240000;
 const MAX_BLOB_CONCURRENCY = 5;
 const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
