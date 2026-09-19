@@ -175,27 +175,27 @@ async function askAnthropic(apiKey, model, messages, maxTokens = 1200, temperatu
   return text;
 }
 
-async function askProvider(ai, env, provider, messages, maxTokens = 1200, temperature = 0.35, role = "AI") {
+async function askProvider(ai, env, provider, messages, maxTokens = 1200, temperature = 0.35, role = "AI", timeoutMs = PRIMARY_TIMEOUT_MS) {
   if (provider === "cloudflare") {
     const model = role === "B" ? MODEL_B : MODEL_A_FALLBACK;
-    return { text: await ask(ai, model, messages, maxTokens, temperature), source: model };
+    return { text: await ask(ai, model, messages, maxTokens, temperature, timeoutMs), source: model };
   }
   if (provider === "openai") {
     const key = await getSecret(env, "OPENAI_API_KEY");
     if (!key) throw new Error("未設定 OPENAI_API_KEY");
     const model = String(env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim();
-    return { text: await askOpenAI(key, model, messages, maxTokens, temperature), source: `OpenAI ${model}` };
+    return { text: await askOpenAI(key, model, messages, maxTokens, temperature, timeoutMs), source: `OpenAI ${model}` };
   }
   if (provider === "anthropic") {
     const key = await getSecret(env, "ANTHROPIC_API_KEY");
     if (!key) throw new Error("未設定 ANTHROPIC_API_KEY");
     const model = String(env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL).trim();
-    return { text: await askAnthropic(key, model, messages, maxTokens, temperature), source: `Claude ${model}` };
+    return { text: await askAnthropic(key, model, messages, maxTokens, temperature, timeoutMs), source: `Claude ${model}` };
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
   const geminiName = String(env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
-  return { text: await askGemini(env, key, messages, maxTokens, temperature), source: `Gemini ${geminiName}` };
+  return { text: await askGemini(env, key, messages, maxTokens, temperature, timeoutMs), source: `Gemini ${geminiName}` };
 }
 
 async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
