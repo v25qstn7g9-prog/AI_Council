@@ -19,6 +19,7 @@ const MAX_REPO_AUDIT_FILES = 80;
 const MAX_REPO_AUDIT_CHARS = 2000000;
 const AUDIT_BATCH_TARGET_CHARS = 280000;
 const MAX_AUDIT_BATCHES = 12;
+const AUDIT_BATCH_CONCURRENCY = 2;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
   "md","txt","xml","yaml","yml","toml","csv","py","java","go","rs",
@@ -338,30 +339,109 @@ function coverageLine(snapshot, reviewedPaths, extraSkipped=[]) {
   return {total,count,pct,skipped};
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results=new Array(items.length);
+  let next=0;
+  async function worker() {
+    while (next<items.length) {
+      const index=next++;
+      results[index]=await mapper(items[index],index);
+    }
+  }
+  await Promise.all(
+    Array.from({length:Math.min(Math.max(1,limit),items.length)},()=>worker())
+  );
+  return results;
+}
+
+export function buildDeterministicAuditReport({fullName,base,question,findings,coverage}) {
+  const batches=(Array.isArray(findings)?findings:[])
+    .map((finding,index)=>{
+      const body=String(finding?.content||"").trim();
+      return body ? `### 批次 ${index+1}\n\n${body}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  const skipped=Array.isArray(coverage?.skipped)&&coverage.skipped.length
+    ? coverage.skipped.map(path=>`- ${path}`).join("\n")
+    : "- 無";
+  const coverageText=`${Number(coverage?.pct||0)}% (${Number(coverage?.count||0)}/${Number(coverage?.total||0)})`;
+
+  return [
+    "# AI Council 工程 Audit Report（證據降級模式）",
+    "## 1. 執行摘要",
+    "最終 AI Evidence Synthesizer 未產生符合結構門檻的報告。系統已改用本地確定性組裝，保留完整 Coverage 與各批次審查內容；本報告可供後續工程師核對，但不把批次 AI 意見自動升格為已證實結論。",
+    "## 2. 本次檢查範圍",
+    `Repository：${fullName}\n\nBase：${base}\n\nAudit Coverage：${coverageText}`,
+    "## 3. 原始任務",
+    String(question||"（未提供）").slice(0,4000),
+    "## 4. 專案架構與程式碼結構",
+    "請參閱第 13 節的逐批證據；本地降級程序不新增任何未出現在批次審查中的架構判斷。",
+    "## 5. 功能與邏輯檢查",
+    "已完成的批次審查原文完整保留於第 13 節。跨檔案結論仍須由工程師依實際原始碼核對。",
+    "## 6. 已證實問題",
+    "降級程序不會把 AI 批次意見自動列為已證實問題。只有附帶明確檔案、位置與可見程式碼證據的項目，才能在人工或後續整合後升級。",
+    "## 7. 推測問題",
+    "批次審查中未具完整跨檔證據的項目均維持推測，不在此重新定性。",
+    "## 8. 待驗證事項",
+    `未審查或略過檔案：\n${skipped}\n\n另需核對第 13 節各批次間是否有衝突。`,
+    "## 9. 安全性與錯誤處理",
+    "本地降級程序未執行程式、測試或部署，因此不宣稱安全、可編譯或可正常運作；相關觀察請依第 13 節逐項核對。",
+    "## 10. 效能與可維護性",
+    "本節不新增推論；保留批次審查中的原始觀察，避免在整合失敗時製造確定性結論。",
+    "## 11. 測試與部署風險",
+    "本次沒有 runtime、測試或部署結果。任何相關結論均為待驗證。",
+    "## 12. 修正建議與最終結論",
+    "先核對第 13 節中具體引用檔案與程式碼的項目，再以最小修改、測試與獨立 Review 驗證。此報告成功保存審查證據，但未完成跨批次 AI 綜合判決。",
+    "## 13. 批次審查證據附錄",
+    batches||"（沒有可用的批次審查內容）"
+  ].join("\n\n");
+}
+
 async function runFullRepoBatchAudit(env, fullName, base, question) {
   const snapshot=await fetchFullRepoAuditFiles(env,fullName,base);
   const plan=planAuditBatches(snapshot.files);
   const findings=[];
   const reviewedPaths=[];
+  const batchFailedPaths=[];
 
-  for (const batch of plan.batches) {
+  const batchFindings=await mapWithConcurrency(plan.batches,AUDIT_BATCH_CONCURRENCY,async batch=>{
     const paths=batch.files.map(f=>f.path);
-    const batchResult=await runAuditBatch({
-      env,
-      question:
-        `【Full Repo Batch Audit ${batch.id}/${plan.batches.length}】 Repository：${fullName} / Base：${base} / 群組：${batch.group}。原始任務：${question}。只審查本批完整檔案；建立證據，不修改程式。`,
-      rawFiles:batch.files,
-    });
-    reviewedPaths.push(...paths);
-    findings.push({
-      path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
-      content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.text||""}`,
-      size:0,
-      truncated:false
-    });
+    try {
+      const batchResult=await runAuditBatch({
+        env,
+        question:
+          `【Full Repo Batch Audit ${batch.id}/${plan.batches.length}】 Repository：${fullName} / Base：${base} / 群組：${batch.group}。原始任務：${question}。只審查本批完整檔案；建立證據，不修改程式。`,
+        rawFiles:batch.files,
+      });
+      return {
+        ok:true,paths,skipped:[],
+        finding:{
+          path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
+          content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.text||""}`,
+          size:0,
+          truncated:false
+        }
+      };
+    } catch {
+      return {
+        ok:false,paths:[],skipped:paths,
+        finding:{
+          path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
+          content:`# Batch ${batch.id}: ${batch.group}\n\nStatus: 審查失敗或逾時。\n\nFiles not reviewed: ${paths.join(", ")}`,
+          size:0,
+          truncated:false
+        }
+      };
+    }
+  });
+  for (const item of batchFindings) {
+    reviewedPaths.push(...item.paths);
+    batchFailedPaths.push(...item.skipped);
+    findings.push(item.finding);
   }
 
-  const coverage=coverageLine(snapshot,reviewedPaths,plan.overflow);
+  const coverage=coverageLine(snapshot,reviewedPaths,[...plan.overflow,...batchFailedPaths]);
   const manifest={
     path:"00-audit-manifest.md",
     truncated:false,
@@ -383,14 +463,23 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
 
   // v4.4：Full Repo Audit 已經完成逐批完整檔案審查，最終階段只需要整合證據。
   // 不再先跑一次完整 A/B + Report pipeline；那會重複消耗 context/token，並讓報告更容易超時或不完整。
-  const primary=await synthesizeAuditEvidence({
-    env,
-    question,
-    rawFiles:[manifest,...findings],
-    coverage,
-  });
+  let primary;
+  try {
+    primary=await synthesizeAuditEvidence({
+      env,
+      question,
+      rawFiles:[manifest,...findings],
+      coverage,
+    });
+  } catch {
+    primary={
+      complete:false,report:"",source:"unavailable",
+      debug:"Evidence Synthesizer 失敗或逾時",
+      sectionCount:0,headingHits:0,length:0
+    };
+  }
   const finalResult={
-    version:"4.4.0",
+    version:"4.5.0",
     a:"",
     b:"",
     final:primary.report||"",
@@ -409,55 +498,30 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-evidence-v4.4",
+      pipelineVersion:"full-repo-evidence-v4.5",
     }
   };
 
   if (finalResult.reportGenerationFailed) {
-    // v4.3：Rescue 不再遞迴呼叫完整 A/B Audit pipeline。
-    // 直接把已完成的完整檔案 batch evidence 交給專用 synthesis，避免第二次又走同一個失敗路徑。
-    const rescue=await synthesizeAuditEvidence({
-      env,
-      question,
-      rawFiles:[manifest,...findings],
-      coverage,
+    // 真正的 deterministic rescue：不再用同一個模型重試同一份證據。
+    // 即使 AI synthesis 失敗，也能立即交付 manifest + 完整批次審查內容，
+    // 並明確標示這是降級證據包，不把 AI 意見升格為已證實結論。
+    const rescueReport=buildDeterministicAuditReport({
+      fullName,base,question,findings,coverage
     });
-    if (rescue.complete) {
-      finalResult.reportGenerationFailed=false;
-      finalResult.final=rescue.report;
-      finalResult.artifact={
-        ...(finalResult.artifact||{}),
-        summary:"Evidence Rescue Synthesis 已完成。",
-        report:rescue.report,
-        pending:[],
-        instructions:["已由完整批次證據重新合成 Audit Report。"],
-        rescuedFromReportFailure:true,
-        rescueSource:rescue.source,
-        rescueSections:rescue.sectionCount,
-        rescueHeadingHits:rescue.headingHits,
-        rescueLength:rescue.length,
-        pipelineVersion:"full-repo-evidence-v4.4",
-      };
-    } else {
-      finalResult.final=[
-        "# AI Council Audit 未完成",
-        "## 狀態",
-        "Primary Report 與 Evidence Rescue 都未達完整度門檻；本次不產生確定性 Audit 結論。",
-        "## 安全限制",
-        "不得依 A/B 原文、[TRUNCATED] reviewer context 或不完整報告直接修改 repository。",
-        "## Coverage",
-        "Audit Coverage "+coverage.pct+"% ("+coverage.count+"/"+coverage.total+" readable files)。"
-      ].join("\n\n");
-      if(finalResult.artifact){
-        finalResult.artifact.report=finalResult.final;
-        finalResult.artifact.pending=["Primary Report 與 Evidence Rescue 均未完成。"];
-        finalResult.artifact.rescueFailed=true;
-        finalResult.artifact.rescueSections=rescue.sectionCount;
-        finalResult.artifact.rescueHeadingHits=rescue.headingHits;
-        finalResult.artifact.rescueLength=rescue.length;
-        finalResult.artifact.pipelineVersion="full-repo-evidence-v4.4";
-      }
-    }
+    finalResult.reportGenerationFailed=false;
+    finalResult.final=rescueReport;
+    finalResult.artifact={
+      ...(finalResult.artifact||{}),
+      summary:"AI synthesis 未達門檻；已產生確定性 Audit 證據報告。",
+      report:rescueReport,
+      pending:["跨批次結論尚未由 AI synthesis 完成，請依證據附錄核對。"],
+      instructions:["優先核對證據附錄中具體引用檔案與程式碼的位置。"],
+      rescuedFromReportFailure:true,
+      deterministicRescue:true,
+      rescueLength:rescueReport.length,
+      pipelineVersion:"full-repo-evidence-v4.5",
+    };
   }
 
   if (finalResult.artifact) {
@@ -697,7 +761,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.4.0",
+      version:audit.result.version||"4.5.0",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
     };
   }

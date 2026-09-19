@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v4.4.1 · 工程協作</title>
+<title>AI 圓桌 v4.5.0 · 工程協作</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 :root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
@@ -116,7 +116,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <form id="composerForm" class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v4.4.1 · Verified Fix Pipeline</span>
+<span id="status" class="badge">v4.5.0 · Guaranteed Audit Delivery</span>
 <div><button id="clear" type="button" class="secondary">清除結果</button> <button id="send" type="button">工程會議</button></div>
 </div>
 </form>
@@ -481,7 +481,7 @@ async function run(){
     try{
       const dryRun = /不要(?:任何)?修改|不要修改|只分析|純分析|分析即可|審查|檢查|分析程式|review|audit|不要建立 PR|不要建立PR|不要產生 PR|不要產生PR/i.test(question) && !/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|fix|change|refactor|delete|remove|add|replace/i.test(question);
       const controller = new AbortController();
-      let timeoutId = setTimeout(()=>controller.abort(), 180000);
+      let timeoutId = setTimeout(()=>controller.abort(), 300000);
       const r=await fetch("/github/engineering",{
         method:"POST",
         headers:{"content-type":"application/json"},
@@ -506,10 +506,11 @@ async function run(){
           ].filter(Boolean).join("\n");
           addCard("err","Audit 診斷",diag);
         }
-        // v4.4.1：後端是 Audit Report 的唯一事實來源。
-        // 前端不得再把 A/B 原文重新拼成「完整報告」，否則會覆蓋 Evidence Rescue 的失敗狀態。
+        // v4.5：後端是 Audit Report 的唯一事實來源。
+        // 前端不得自行製造可下載的「假報告」；空報告只顯示診斷。
         if(typeof d.artifact.report==="string" && !d.artifact.report.trim()){
-          d.artifact.report="# AI Council Audit 未完成\n\n後端沒有回傳可用的 Audit Report。";
+          delete d.artifact.report;
+          addCard("err","Audit Report 未產生","後端沒有回傳可下載的報告內容；請保留上方診斷資訊後重試。");
         }
         renderArtifact(d.artifact);
       }
@@ -527,7 +528,7 @@ async function run(){
     }catch(e){
       clearTimeout(timeoutId);
       const msg = e?.name === "AbortError"
-        ? "工程會議超過 180 秒仍未完成；GitHub 可能已讀取成功，但完整雙 AI 審查與報告仍未完成，請稍後再試。"
+        ? "工程會議超過 300 秒仍未完成；GitHub 可能已讀取成功，但完整雙 AI 審查與報告仍未完成，請稍後再試。"
         : String(e?.message||e);
       addCard("err","GitHub 工程模式失敗",msg);
       status.textContent="失敗";
