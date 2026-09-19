@@ -546,6 +546,108 @@ ${a}
   ], 1500, 0.25);
   const b = bResult.text;
 
+  if (analysisOnly && reportRequested) {
+    const reportPrompt = `你現在是資深軟體工程 Audit Lead。
+
+【使用者原始任務】
+${q}
+
+【專案實際原始碼】
+${projectContext || "（無附件）"}
+
+【AI A 主工程師分析】
+${a}
+
+【AI B Reviewer 分析】
+${b}
+
+這次唯一交付物是「完整工程 Audit Report」。
+請直接輸出一份完整的 Markdown 純文字報告，不要輸出 JSON、不要使用 JSON 欄位包住報告、不要輸出 FILE 區塊、不要修改程式。
+
+報告至少必須包含以下章節：
+# 工程 Audit Report
+## 1. 執行摘要
+## 2. 本次檢查範圍
+列出實際讀取並檢查的檔案；沒有讀到的不要聲稱檢查過。
+## 3. 專案架構與程式碼結構
+## 4. 功能與邏輯檢查
+## 5. 已證實問題
+每項必須包含：檔案、位置、證據、影響、嚴重度。
+如果沒有足夠證據，不能列在這一節。
+## 6. 推測問題
+與已證實問題嚴格分開。
+## 7. 待驗證事項
+## 8. 安全性 Audit
+## 9. 錯誤處理 Audit
+## 10. 效能與可維護性
+## 11. 測試與部署風險
+## 12. 修正建議
+依優先程度說明，但不要假裝已經修改。
+## 13. AI A / AI B 分歧與交叉驗證
+明確指出兩者一致、不同或其中一方證據不足的地方。
+## 14. 最終結論
+
+嚴格規則：
+1. 只根據實際看到的程式碼與上方 A/B 分析。
+2. [TRUNCATED] 代表內容不完整；禁止從缺失內容推斷 Syntax Error、缺少括號、缺少變數等。
+3. 沒有執行證據，不得宣稱「一定會失敗」。
+4. 不得虛構測試結果、API 回應、部署結果。
+5. 建議不是已發生的問題。
+6. 每個重大問題都要給出具體檔案與證據。
+7. 證據不足就寫「待驗證」。
+8. 不要為了湊數量硬找問題。
+9. 如果目前沒有足夠證據確認重大問題，要明確說明。
+10. 完整報告比摘要重要；請產生真正可交給另一位工程師進行第二層審查的報告。
+`;
+
+    const reportResult = await askA(env.AI, env, [
+      { role:"system", content:"你是資深軟體工程 Audit Lead。只輸出完整 Markdown 工程審查報告，不輸出 JSON，不修改程式。用繁體中文，證據導向。" },
+      { role:"user", content:reportPrompt },
+    ], 6500, 0.1);
+
+    const report = String(reportResult.text || "").trim();
+    const summary = report
+      ? report.split(/\n\s*##\s+/)[0].slice(0, 1600)
+      : "完整工程報告產生失敗";
+
+    const artifact = {
+      summary,
+      rootCause:"",
+      report,
+      verified:[],
+      inferences:[],
+      pending:[],
+      review:[],
+      instructions: report
+        ? ["已產生完整工程 Audit Report，可使用下載按鈕交給另一個 AI 做第二層獨立審查。"]
+        : ["AI 沒有回傳完整報告，請稍後重試。"],
+      sources:[],
+      files:[],
+    };
+
+    return {
+      version:VERSION,
+      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
+      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
+      a, b,
+      final:report || summary,
+      artifact,
+      debug:[aResult.debug, bResult.debug, reportResult.debug].filter(Boolean).join("\n") || undefined,
+      filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
+      reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
+      reportRequested:true,
+      reportOnly:true,
+      imageReports,
+      webSearchRequested,
+      search:{
+        ok:Boolean(search.ok), used:Boolean(search.used),
+        reason:search.reason, message:search.message,
+        resultCount:Number(search.resultCount||0),
+        ...(search.detail ? {detail:search.detail} : {})
+      }
+    };
+  }
+
   if (analysisOnly) {
     const analysisPrompt = `你現在是最終 Code Review 整合工程師。
 
