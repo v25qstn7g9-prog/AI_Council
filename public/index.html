@@ -521,11 +521,25 @@ async function run(){
   }finally{send.disabled=false}
 }
 const composerForm=$("#composerForm");
-send.addEventListener("click",e=>{
-  e.preventDefault();
-  run();
+let runBusy=false;
+function submitEngineering(e){
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  if(runBusy)return;
+  runBusy=true;
+  Promise.resolve(run()).finally(()=>{runBusy=false});
+}
+composerForm.addEventListener("submit",submitEngineering);
+send.addEventListener("click",submitEngineering);
+send.addEventListener("pointerup",e=>{
+  if(e.pointerType==="touch")submitEngineering(e);
 });
-q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
+q.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){
+    e.preventDefault();
+    submitEngineering(e);
+  }
+});
 
 // 優化：清除結果時同步釋放 Map 與 Blob 記憶體
 $("#clear").onclick=()=>{
