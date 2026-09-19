@@ -605,10 +605,70 @@ ${b}
       { role:"user", content:reportPrompt },
     ], 6500, 0.1, FALLBACK_TIMEOUT_MS);
 
-    const report = String(reportResult.text || "").trim();
-    const summary = report
-      ? report.split(/\n\s*##\s+/)[0].slice(0, 1600)
-      : "完整工程報告產生失敗";
+    let report = String(reportResult.text || "").trim();
+
+    // 某些模型在長報告要求下偶爾只回傳標題。這種輸出不能視為成功報告。
+    // 若內容過短或缺少主要章節，改用 A/B 已完成的審查結果組成第二次、
+    // 較小 context 的報告請求，避免再次把整份原始碼塞給模型而只得到標題。
+    const reportLooksComplete = (text) => {
+      const value = String(text || "").trim();
+      const sectionCount = (value.match(/^##\s+/gm) || []).length;
+      return value.length >= 1200 && sectionCount >= 6;
+    };
+
+    if (!reportLooksComplete(report)) {
+      const retryPrompt = `你是工程 Audit Lead。第一次完整報告輸出不完整，這次請根據兩位工程師已完成的審查結果，重新產生可交付的 Markdown Audit Report。
+
+【使用者任務】
+${q}
+
+【AI A 主工程師審查】
+${a}
+
+【AI B Reviewer 審查】
+${b}
+
+必須直接寫實質內容，不可只輸出標題。至少包含：
+# AI Council 工程 Audit Report
+## 1. 執行摘要
+## 2. 本次檢查範圍
+## 3. 架構與程式碼結構
+## 4. 功能與邏輯
+## 5. 已證實問題
+## 6. 推測問題與待驗證事項
+## 7. 安全性與錯誤處理
+## 8. 效能與可維護性
+## 9. 測試與部署風險
+## 10. 修正建議
+## 11. AI A / AI B 交叉驗證
+## 12. 最終結論
+
+規則：只能使用 A/B 已有證據；證據不足寫待驗證；不得虛構測試、部署或未讀取的程式碼。完整報告至少 1200 字元。`;
+
+      const retryResult = await askA(env.AI, env, [
+        { role:"system", content:"只輸出完整 Markdown 工程 Audit Report。禁止只回標題或摘要。" },
+        { role:"user", content:retryPrompt },
+      ], 5000, 0.1, FALLBACK_TIMEOUT_MS);
+
+      const retryReport = String(retryResult.text || "").trim();
+      if (reportLooksComplete(retryReport) || retryReport.length > report.length) {
+        report = retryReport;
+      }
+    }
+
+    // 最後防線：絕不把只有標題的內容當成「報告成功」提供下載。
+    if (!reportLooksComplete(report)) {
+      const fallbackSections = [
+        "# AI Council 工程 Audit Report",
+        "## 1. 執行摘要\n完整報告模型未能產生足夠長度的最終稿；以下保留雙 AI 已完成的實際審查內容，避免下載到只有標題的空報告。",
+        "## 2. AI A 主工程師審查\n" + a,
+        "## 3. AI B Reviewer 審查\n" + b,
+        "## 4. 待驗證事項\n最終 Audit Lead 未產生符合完整度門檻的報告；請依上方 A/B 證據進行後續人工或第二層 AI 審查。"
+      ];
+      report = fallbackSections.join("\n\n");
+    }
+
+    const summary = report.split(/\n\s*##\s+/)[0].slice(0, 1600);
 
     const artifact = {
       summary,
