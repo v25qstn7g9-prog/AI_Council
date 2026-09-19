@@ -1,0 +1,8 @@
+{
+  "name": "ai-council",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/audit-pipeline.test.mjs"
+  }
+}
