@@ -5,7 +5,7 @@
  * 最後只建立新 branch + Pull Request，不直接修改 base branch。
  */
 
-import { runEngineeringCouncil, runAuditBatch, runFixDirectionReview, runPostFixReview, synthesizeAuditEvidence } from "./debate.js";
+import { runEngineeringCouncil, runAuditBatch, runAuditBatchFallback, runFixDirectionReview, runPostFixReview, synthesizeAuditEvidence } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
@@ -251,7 +251,7 @@ async function fetchRepoFiles(env, fullName, base) {
 }
 
 
-function auditGroup(path) {
+export function auditGroup(path) {
   const p = String(path || "").toLowerCase();
   if (/^(worker|src\/worker)|routes?|middleware/.test(p)) return "01-runtime-routing";
   if (/ai|gemini|openai|anthropic|ask|chat|llm/.test(p)) return "02-ai";
@@ -259,6 +259,7 @@ function auditGroup(path) {
   if (/^public\/|\.html?$|\.css$|frontend|ui/.test(p)) return "04-frontend";
   if (/test|spec|fixture/.test(p)) return "05-tests";
   if (/package|readme|deploy|version|config|wrangler|vercel/.test(p)) return "06-build-docs";
+  if (/^(functions|api)\//.test(p) || /health|monitor/.test(p)) return "01-runtime-routing";
   return "07-other";
 }
 
@@ -501,7 +502,23 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
         : /429|額度|rate.?limit/i.test(message)
           ? "模型額度或速率限制"
           : "模型服務未回應";
-      return {
+      try {
+        const emergency=await runAuditBatchFallback({
+          env,
+          question:`【Emergency Batch Evidence ${batch.id}/${plan.batches.length}】 Repository：${fullName} / Base：${base}。原始任務：${question}。A/B 服務失敗，只保存本批證據，不做最終裁決。`,
+          rawFiles:batch.files,
+        });
+        return {
+          ok:true,paths,skipped:[],aOk:false,bOk:false,cBatchOk:true,
+          finding:{path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n## AI C 緊急批次證據（A/B 服務失敗）\n\n${emergency.text}`,size:0,truncated:false},
+          aFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI A：審查失敗（${reason}）。`,
+          bFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI B：審查失敗（${reason}）。`,
+          cFinding:`# Batch ${batch.id}: ${batch.group}\n\n${emergency.text}`,
+          cSource:emergency.source,
+        };
+      } catch (cError) {
+        const cReason=/逾時|timeout/i.test(String(cError?.message||""))?"AI C 亦逾時":"AI C 亦未回應";
+        return {
         ok:false,paths:[],skipped:paths,aOk:false,bOk:false,
         finding:{
           path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
@@ -510,8 +527,10 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
           truncated:false
         },
         aFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI A：審查失敗（${reason}）。`,
-        bFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI B：審查失敗（${reason}）。`
+        bFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI B：審查失敗（${reason}）。`,
+        cFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI C：${cReason}。`,cBatchOk:false
       };
+      }
     }
   });
   for (const item of batchFindings) {
@@ -522,6 +541,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
 
   const aReviewedPaths=batchFindings.filter(x=>x.aOk).flatMap(x=>x.paths);
   const bReviewedPaths=batchFindings.filter(x=>x.bOk).flatMap(x=>x.paths);
+  const cEmergencyReviewedPaths=batchFindings.filter(x=>x.cBatchOk).flatMap(x=>x.paths);
   const aReport=batchFindings.map(x=>x.aFinding).join("\n\n---\n\n");
   const bReport=batchFindings.map(x=>x.bFinding).join("\n\n---\n\n");
 
@@ -539,6 +559,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       `Audit Coverage: ${coverage.pct}%`,
       `AI A Coverage: ${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,
       `AI B Coverage: ${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,
+      `AI C Emergency Coverage: ${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`,
       `Batch count: ${plan.batches.length}`,
       "Reviewed files:",
       ...reviewedPaths.map(p=>`- ${p}`),
@@ -565,7 +586,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.7.1",
+    version:"4.8.0",
     a:aReport,
     b:bReport,
     c:primary.report||"",
@@ -588,7 +609,8 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisAttempts:primary.attempts||1,
       synthesisDebug:primary.debug||"",
       cCompleted:Boolean(primary.complete),
-      pipelineVersion:"full-repo-abc-evidence-v4.7.1",
+      cEmergencyReviewedFiles:cEmergencyReviewedPaths,
+      pipelineVersion:"full-repo-abc-evidence-v4.8",
       aReviewedFiles:aReviewedPaths,
       bReviewedFiles:bReviewedPaths,
     }
@@ -598,9 +620,10 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     // 真正的 deterministic rescue：不再用同一個模型重試同一份證據。
     // 即使 AI synthesis 失敗，也能立即交付 manifest + 完整批次審查內容，
     // 並明確標示這是降級證據包，不把 AI 意見升格為已證實結論。
-    const rescueReport=buildDeterministicAuditReport({
+    const rescueBase=buildDeterministicAuditReport({
       fullName,base,question,findings,coverage
     });
+    const rescueReport=[rescueBase,"## 14. Pipeline 診斷",`Pipeline：full-repo-abc-evidence-v4.8`,`AI C 完成：否`,`AI C 嘗試次數：${primary.attempts||2}`,`AI C 最後來源：${primary.source||"unavailable"}`,`AI C 診斷：${primary.debug||"未提供"}`,`AI A Coverage：${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI B Coverage：${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI C 緊急批次 Coverage：${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`].join("\n\n");
     finalResult.c="AI C 未完成證據裁決；以下最終報告為本地確定性降級證據包，不能視為 C 層判決。";
     finalResult.final=rescueReport;
     finalResult.artifact={
@@ -613,7 +636,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       deterministicRescue:true,
       rescueLength:rescueReport.length,
       cCompleted:false,
-      pipelineVersion:"full-repo-abc-evidence-v4.7.1",
+      pipelineVersion:"full-repo-abc-evidence-v4.8",
     };
   }
 
@@ -863,7 +886,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       c:audit.result.c,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.7.1",
+      version:audit.result.version||"4.8.0",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
