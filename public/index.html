@@ -480,7 +480,7 @@ async function run(){
     try{
       const dryRun = /不要(?:任何)?修改|不要修改|只分析|純分析|分析即可|不要建立 PR|不要建立PR|不要產生 PR|不要產生PR/i.test(question);
       const controller = new AbortController();
-      const timeoutId = setTimeout(()=>controller.abort(), 90000);
+      let timeoutId = setTimeout(()=>controller.abort(), 120000);
       const r=await fetch("/github/engineering",{
         method:"POST",
         headers:{"content-type":"application/json"},
@@ -506,7 +506,7 @@ async function run(){
     }catch(e){
       clearTimeout(timeoutId);
       const msg = e?.name === "AbortError"
-        ? "工程會議超過 90 秒仍未完成；GitHub 連線本身正常，這次分析可能太大，請縮小任務範圍後再試。"
+        ? "工程會議超過 120 秒仍未完成；GitHub 可能已讀取成功，但整體 AI 工程分析尚未完成，請稍後再試。"
         : String(e?.message||e);
       addCard("err","GitHub 工程模式失敗",msg);
       status.textContent="失敗";
