@@ -565,13 +565,14 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.6.0",
+    version:"4.7.0",
     a:aReport,
     b:bReport,
+    c:primary.report||"",
     final:primary.report||"",
     reportGenerationFailed:!primary.complete,
     artifact:{
-      summary:primary.complete ? "Full Repo Evidence Synthesis 已完成。" : "Primary Evidence Synthesis 未達完整度門檻。",
+      summary:primary.complete ? "AI C 已完成 A/B 證據裁決並產生最終報告。" : "AI C 證據裁決未達完整度門檻。",
       report:primary.report||"",
       verified:[],
       inferences:[],
@@ -584,7 +585,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-dual-evidence-v4.6",
+      pipelineVersion:"full-repo-abc-evidence-v4.7",
       aReviewedFiles:aReviewedPaths,
       bReviewedFiles:bReviewedPaths,
     }
@@ -598,6 +599,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       fullName,base,question,findings,coverage
     });
     finalResult.reportGenerationFailed=false;
+    finalResult.c=rescueReport;
     finalResult.final=rescueReport;
     finalResult.artifact={
       ...(finalResult.artifact||{}),
@@ -608,7 +610,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-dual-evidence-v4.6",
+      pipelineVersion:"full-repo-abc-evidence-v4.7",
     };
   }
 
@@ -855,9 +857,10 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       batchCount:audit.batchCount,
       a:audit.result.a,
       b:audit.result.b,
+      c:audit.result.c,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.6.0",
+      version:audit.result.version||"4.7.0",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
@@ -881,7 +884,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const result = await runEngineeringCouncil({
     env,
     question:
-      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}${fixDirection ? `\n\n【已核准 Fix Direction】\n${JSON.stringify(fixDirection.direction)}\n只能依 scopeFiles 與 recommended 方案修改，不得自行換方案或擴大範圍。` : ""}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
+      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}${fixDirection ? `\n\n【已核准 Fix Direction】\n${JSON.stringify(fixDirection.direction)}\n只能依 scopeFiles 與 recommended 方案修改，不得自行換方案或擴大範圍。` : ""}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 主審，再由 AI B 反方複審，最後由獨立 AI C 裁決證據並整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
     rawFiles: snapshot.files,
     rawImages: [],
     webSearch: false,
@@ -894,11 +897,11 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
   if (!analysisOnly && proposed.length && fixDirection) {
     const mechanical=mechanicalFixGate(proposed,originalMap,fixDirection.direction?.scopeFiles||[]);
-    if(!mechanical.ok) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:mechanical,a:result.a,b:result.b,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
+    if(!mechanical.ok) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:mechanical,a:result.a,b:result.b,c:result.c,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     const afterFiles=proposed.map(f=>({path:f.path,content:f.content,truncated:false}));
     const beforeFiles=proposed.map(f=>({path:f.path,content:originalMap.get(f.path),truncated:false}));
     const post=await runPostFixReview({env,task:question,beforeFiles,afterFiles,direction:fixDirection.direction});
-    if(!post.approved) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:{mechanical,post},a:result.a,b:result.b,final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
+    if(!post.approved) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:{mechanical,post},a:result.a,b:result.b,c:result.c,final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     result.fixVerification={mechanical,post};
   }
   if (analysisOnly || !proposed.length) {
@@ -910,6 +913,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       scannedFiles: snapshot.files.map(f => f.path),
       a: result.a,
       b: result.b,
+      c: result.c,
       final: result.final,
       artifact: result.artifact || null,
       reportRequested,
@@ -944,6 +948,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     fixVerification: result.fixVerification || null,
     a: result.a,
     b: result.b,
+    c: result.c,
     final: result.final,
     artifact: result.artifact || null,
     reportRequested,
