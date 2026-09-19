@@ -231,7 +231,28 @@ async function fetchRepoFiles(env, fullName, base) {
   return { files, treeEntryCount: entries.length, truncated: false };
 }
 
-function validateProposedFiles(proposed, originalMap) {
+function extractFunctionNames(source) {
+  const names = new Set();
+  const s = String(source || "");
+  const patterns = [
+    /(?:^|\\n)\\s*(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)\\s*\\(/g,
+    /(?:^|\\n)\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?\\([^\\n]*\\)\\s*=>/g,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(s)) !== null) names.add(m[1]);
+  }
+  return names;
+}
+
+function taskExplicitlyRequestsDeletion(task, name) {
+  const t = String(task || "").toLowerCase();
+  const n = String(name || "").toLowerCase();
+  if (n && t.includes(n)) return true;
+  return /\\b(delete|remove|rename|refactor|rewrite|replace|obsolete|移除|刪除|刪掉|重命名|重新命名|重構|改寫|替換|淘汰)\\b/i.test(t);
+}
+
+function validateProposedFiles(proposed, originalMap, task = "") {
   const seen = new Set();
   const out = [];
   for (const raw of Array.isArray(proposed) ? proposed : []) {
@@ -240,8 +261,17 @@ function validateProposedFiles(proposed, originalMap) {
     if (!originalMap.has(path)) continue;
     if (typeof raw?.content !== "string") continue;
     if (raw.content.length > MAX_FILE_CHARS * 2) continue;
+
     const original = originalMap.get(path);
     if (raw.content === original) continue;
+
+    // 防止 LLM 產生「看似修一小段，實際把整個檔案其他功能刪掉」的完整檔案。
+    // 若原檔的具名函式在新檔消失，除非任務明確要求該函式被刪除/重構，否則拒絕建立 PR。
+    const originalFns = extractFunctionNames(original);
+    const proposedFns = extractFunctionNames(raw.content);
+    const missingFns = [...originalFns].filter(name => !proposedFns.has(name) && !taskExplicitlyRequestsDeletion(task, name));
+    if (missingFns.length) continue;
+
     seen.add(path);
     out.push({ path, content: raw.content });
   }
@@ -389,7 +419,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     analysisOnly: dryRun,
   });
 
-  const proposed = validateProposedFiles(result?.artifact?.files, originalMap);
+  const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
   if (dryRun || !proposed.length) {
     return {
       ok: true,
