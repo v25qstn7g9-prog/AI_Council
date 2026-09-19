@@ -738,7 +738,7 @@ ${target.content}
           rescueErrors.push(`${target.path}：AI 沒有輸出完整 FILE 區塊`);
         }
       } catch (e) {
-        rescueErrors.push(`${target.path}：${String(e?.message || e || "未知錯誤")}`);
+        rescueErrors.push(`${target.path}：AI 修復服務暫時失敗`);
       }
     }
 
