@@ -392,6 +392,27 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     reportMode:true,
   });
 
+  if (finalResult?.reportGenerationFailed) {
+    const rescueQuestion =
+      "【Audit Rescue Synthesis】Repository：" + fullName + " / Base：" + base +
+      "。原始任務：" + question + "。Coverage " + coverage.pct + "% (" +
+      coverage.count + "/" + coverage.total + ")。以下只包含完整檔案批次產生的證據摘要。" +
+      "請重新產生完整 Audit Report；若摘要提到 [TRUNCATED]，一律視為審查上下文限制而非 repository 檔案損壞，不得升格 Must Fix。";
+    const rescue=await runEngineeringCouncil({
+      env,
+      question:rescueQuestion,
+      rawFiles:[manifest,...findings],
+      rawImages:[],
+      webSearch:false,
+      analysisOnly:true,
+      reportMode:true,
+    });
+    if (!rescue?.reportGenerationFailed) {
+      if (rescue.artifact) rescue.artifact.rescuedFromReportFailure=true;
+      Object.assign(finalResult,rescue);
+    }
+  }
+
   if (finalResult.artifact) {
     finalResult.artifact.coverage=coverage;
     finalResult.artifact.batchCount=plan.batches.length;
