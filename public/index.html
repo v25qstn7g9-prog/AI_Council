@@ -117,7 +117,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
 <span id="status" class="badge">v3.11.0 · 檔案輸出修正版</span>
-<div><button id="clear" type="button" class="secondary">清除結果</button> <button id="send" type="submit">工程會議</button></div>
+<div><button id="clear" type="button" class="secondary">清除結果</button> <button id="send" type="button">工程會議</button></div>
 </div>
 </form>
 </footer>
@@ -521,7 +521,7 @@ async function run(){
   }finally{send.disabled=false}
 }
 const composerForm=$("#composerForm");
-composerForm.addEventListener("submit",e=>{
+send.addEventListener("click",e=>{
   e.preventDefault();
   run();
 });
