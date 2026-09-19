@@ -279,7 +279,7 @@ async function searchWeb(env, query) {
       text:results.map((x,i)=>`${i+1}. ${x.title||"（無標題）"}\n${x.content||""}\n來源：${x.url||""}`).join("\n\n")
     };
   } catch (e) {
-    return { ok:false, used:false, reason:"network_error", message:"Tavily 連線失敗", detail:undefined.slice(0,300), text:"", resultCount:0 };
+    return { ok:false, used:false, reason:"network_error", message:"Tavily 連線失敗", detail:undefined, text:"", resultCount:0 };
   }
 }
 
