@@ -504,7 +504,7 @@ async function run(){
         if(typeof d.artifact.report==="string"){
           const reportText=d.artifact.report.trim();
           const finalText=typeof d.final==="string"?d.final.trim():"";
-          const countSections=(text)=>(String(text||"").match(/^##\\s+/gm)||[]).length;
+          const countSections=(text)=>(String(text||"").match(/^##\s+/gm)||[]).length;
           const looksComplete=(text)=>String(text||"").trim().length>=1200&&countSections(text)>=6;
 
           // artifact.report 偶爾只帶回標題，但 d.final 已經是完整 Audit Report。
@@ -520,7 +520,7 @@ async function run(){
               "## 4. 最終整合原始回覆\\n"+(finalText||reportText||"（無內容）"),
               "## 5. 待驗證事項\\n後端完整報告生成未達完整度門檻，需依上方雙 AI 證據進一步核對。",
               "## 6. 結論\\n本檔保留本次實際工程審查內容，不將只有標題的輸出視為完整 Audit Report。"
-            ].join("\\n\\n");
+            ].join("\n\n");
           }
         }
         renderArtifact(d.artifact);
