@@ -465,6 +465,10 @@ async function run(){
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
+  // 送出後立即把使用者原始指令保留在對話區。
+  // 之前這行只存在一般工程模式，GitHub 工程模式會直接 return，
+  // 因此使用者送出的文字看起來像「消失」。
+  addCard("me","你",question);
 
   if(githubMode.checked){
     forceDismissKeyboard();
@@ -517,7 +521,6 @@ async function run(){
     return;
   }
   forceDismissKeyboard();
-  addCard("me","你",question);
 
   let isChat=chatModeEl.checked;
   if(isChat&&shouldExitChatMode(question)){
