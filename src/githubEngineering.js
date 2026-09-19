@@ -398,6 +398,75 @@ export function buildDeterministicAuditReport({fullName,base,question,findings,c
   ].join("\n\n");
 }
 
+function reportList(values, empty="- 無") {
+  const items=(Array.isArray(values)?values:[]).map(x=>String(x||"").trim()).filter(Boolean);
+  return items.length ? items.map(x=>`- ${x}`).join("\n") : empty;
+}
+
+export function buildDeterministicEngineeringReport({task,response}) {
+  const artifact=response?.artifact||{};
+  const action=String(response?.action||"unknown");
+  const actionLabel={
+    pull_request:"已建立 Draft Pull Request",
+    no_changes:"沒有產生可提交變更",
+    analysis_only:"僅分析，未修改 repository",
+    direction_not_approved:"修正方向未通過驗證",
+    verification_failed:"修改未通過驗證 Gate"
+  }[action]||action;
+  const direction=response?.fixDirection;
+  const verification=response?.fixVerification||response?.verification;
+  const gateLines=[
+    `- Fix Direction Gate：${direction ? (direction.approved===true?"通過":"未通過") : "未執行或無資料"}`,
+    `- Mechanical Fix Gate：${verification?.mechanical ? (verification.mechanical.ok===true?"通過":"未通過") : (verification?.ok===true?"通過":"未執行或無資料")}`,
+    `- Before/After Review：${verification?.post ? (verification.post.approved===true?"通過":"未通過") : "未執行或無資料"}`,
+    "- Runtime／部署測試：本流程未提供執行證據"
+  ].join("\n");
+
+  return [
+    "# AI Council 工程處理報告",
+    "## 1. 執行摘要",
+    String(artifact.summary||response?.final||"工程流程已完成，但 AI 未提供摘要。").slice(0,3000),
+    "## 2. Repository 與任務",
+    `Repository：${response?.repository||"未提供"}\n\nBase：${response?.base||"未提供"}\n\n任務：${String(task||"（未提供）").slice(0,4000)}`,
+    "## 3. 實際檢查範圍",
+    reportList(response?.scannedFiles),
+    "## 4. 根因判斷",
+    String(artifact.rootCause||"目前沒有足夠證據確認單一根因。").slice(0,4000),
+    "## 5. 已證實事項",
+    reportList(artifact.verified),
+    "## 6. 推測與待驗證事項",
+    `### 推測\n${reportList(artifact.inferences)}\n\n### 待驗證\n${reportList(artifact.pending)}`,
+    "## 7. 修正結果",
+    `流程結果：${actionLabel}\n\n變更檔案：\n${reportList(response?.changedFiles)}`,
+    "## 8. 驗證 Gate",
+    gateLines,
+    "## 9. Pull Request",
+    response?.pr?.url
+      ? `PR：${response.pr.url}\n\n狀態：${response.pr.draft?"Draft":"Open"}\n\nBranch：${response?.branch||"未提供"}\n\nCommit：${response?.commitSha||"未提供"}`
+      : "本次沒有建立 Pull Request。",
+    "## 10. AI A / AI B 審查附錄",
+    `以下是 AI 審查意見，不是獨立執行證據。\n\n### AI A\n${String(response?.a||"（無輸出）").slice(0,5000)}\n\n### AI B\n${String(response?.b||"（無輸出）").slice(0,5000)}`,
+    "## 11. 最終結論",
+    String(response?.final||artifact.summary||actionLabel).slice(0,4000)
+  ].join("\n\n");
+}
+
+function ensureRequestedEngineeringReport(response, task, requested) {
+  if (!requested) return response;
+  const artifact=response.artifact||(response.artifact={summary:"",files:[]});
+  if (typeof artifact.report!=="string"||!artifact.report.trim()) {
+    artifact.report=buildDeterministicEngineeringReport({task,response});
+    artifact.deterministicEngineeringReport=true;
+    artifact.instructions=[
+      ...(Array.isArray(artifact.instructions)?artifact.instructions:[]),
+      "AI 未輸出完整工程報告，系統已依實際流程結果建立確定性報告。"
+    ];
+  }
+  response.reportRequested=true;
+  response.reportGenerationFailed=false;
+  return response;
+}
+
 async function runFullRepoBatchAudit(env, fullName, base, question) {
   const snapshot=await fetchFullRepoAuditFiles(env,fullName,base);
   const plan=planAuditBatches(snapshot.files);
@@ -479,7 +548,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.5.0",
+    version:"4.5.1",
     a:"",
     b:"",
     final:primary.report||"",
@@ -498,7 +567,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-evidence-v4.5",
+      pipelineVersion:"full-repo-evidence-v4.5.1",
     }
   };
 
@@ -520,7 +589,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-evidence-v4.5",
+      pipelineVersion:"full-repo-evidence-v4.5.1",
     };
   }
 
@@ -761,8 +830,9 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.5.0",
+      version:audit.result.version||"4.5.1",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
+      reportRequested:true,
     };
   }
 
@@ -773,10 +843,10 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   if (!analysisOnly && modificationRequested) {
     const directionReview=await runFixDirectionReview({env,task:question,rawFiles:snapshot.files,finding:question});
     if (!directionReview.approved) {
-      return {ok:true,action:"direction_not_approved",repository:fullName,base:safeBase,
+      return ensureRequestedEngineeringReport({ok:true,action:"direction_not_approved",repository:fullName,base:safeBase,
         scannedFiles:snapshot.files.map(f=>f.path),fixDirection:directionReview,
         final:"修正方向尚未通過 Verified Fix Direction Gate，因此沒有修改檔案或建立 PR。",
-        artifact:{summary:"修正方向未核准",rootCause:directionReview.direction?.rootCause||"",verified:[],inferences:[],pending:directionReview.direction?.pending||[],review:[directionReview.reviewer],instructions:["補足證據或縮小修正範圍後再執行"],files:[]}};
+        artifact:{summary:"修正方向未核准",rootCause:directionReview.direction?.rootCause||"",verified:[],inferences:[],pending:directionReview.direction?.pending||[],review:[directionReview.reviewer],instructions:["補足證據或縮小修正範圍後再執行"],files:[]}},question,reportRequested);
     }
     fixDirection=directionReview;
   }
@@ -795,15 +865,15 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
   if (!analysisOnly && proposed.length && fixDirection) {
     const mechanical=mechanicalFixGate(proposed,originalMap,fixDirection.direction?.scopeFiles||[]);
-    if(!mechanical.ok) return {ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),fixDirection,verification:mechanical,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null};
+    if(!mechanical.ok) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:mechanical,a:result.a,b:result.b,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     const afterFiles=proposed.map(f=>({path:f.path,content:f.content,truncated:false}));
     const beforeFiles=proposed.map(f=>({path:f.path,content:originalMap.get(f.path),truncated:false}));
     const post=await runPostFixReview({env,task:question,beforeFiles,afterFiles,direction:fixDirection.direction});
-    if(!post.approved) return {ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),fixDirection,verification:{mechanical,post},final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null};
+    if(!post.approved) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:{mechanical,post},a:result.a,b:result.b,final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     result.fixVerification={mechanical,post};
   }
   if (analysisOnly || !proposed.length) {
-    return {
+    return ensureRequestedEngineeringReport({
       ok: true,
       action: analysisOnly ? "analysis_only" : "no_changes",
       repository: fullName,
@@ -813,7 +883,8 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b: result.b,
       final: result.final,
       artifact: result.artifact || null,
-    };
+      reportRequested,
+    },question,reportRequested);
   }
 
   const prResult = await createPullRequest(
@@ -825,7 +896,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     result?.artifact?.summary || "AI 圓桌工程修正"
   );
 
-  return {
+  return ensureRequestedEngineeringReport({
     ok: true,
     action: "pull_request",
     repository: fullName,
@@ -846,7 +917,8 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     b: result.b,
     final: result.final,
     artifact: result.artifact || null,
-  };
+    reportRequested,
+  },question,reportRequested);
 }
 
 export async function handleGitHubEngineering(request, env) {
