@@ -68,4 +68,37 @@ assert.deepEqual(integrity.map(x=>x.id),["HTML_ROOT_INCOMPLETE","NATIVE_CODE_LIT
 }
 const deterministic=buildDeterministicAuditReport({fullName:"o/r",base:"main",question:"審核",findings:[],coverage:{pct:100,count:1,total:1,skipped:[]}});
 assert.match(deterministic,/Audit Coverage：100%/);
+
+// v4.9.1 regression：unsafeConclusion 只應掃描「最終結論」章節，
+// 不得因為非結論章節如實描述「無重大問題」就整份打回重試。
+const reportSectionsBase=[
+  "# Audit Report",
+  "## 執行摘要\n完成證據裁決，發現 Critical 缺陷。",
+  "## 檢查範圍\nAudit Coverage 100% (1/1)。",
+  "## 架構\n模組化架構，本批次無重大問題。",
+  "## 功能邏輯\n依可見程式碼核對。",
+  "## 已證實問題\n[HTML_ROOT_INCOMPLETE] 與 [NATIVE_CODE_LITERAL] 均有直接證據支持，判定為 Critical。",
+  "## 推測問題\n無。",
+  "## 待驗證\n需執行測試。",
+  "## 安全性與錯誤處理\n未執行動態測試。",
+  "## 效能與可維護性\n待量測。",
+  "## 測試部署風險\n未部署。",
+  "## 修正建議\n先修復 index.html 結構。",
+  "## AI A / AI B 分歧與 AI C 裁決\nA/B 意見依直接證據裁決。",
+];
+{
+  const reportBenignNote=[...reportSectionsBase,"## 最終結論\n存在 Critical 缺陷，前端無法正常運作，不符合部署標準。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportBenignNote}));
+  const accepted=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(accepted.complete,true,"非結論章節如實描述『無重大問題』不應阻擋 AI C 通過");
+}
+{
+  const reportUnsafeConclusion=[...reportSectionsBase,"## 最終結論\n整體程式碼品質良好，沒有重大問題。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportUnsafeConclusion}));
+  const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(rejected.complete,false,"結論本身淡化 critical finding 時仍應被擋下");
+}
+
 console.log("audit-pipeline tests: ok");
