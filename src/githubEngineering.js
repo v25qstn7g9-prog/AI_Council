@@ -428,7 +428,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
 
   // 「產生完整/詳細審查報告」本質上是分析交付，不應因使用者沒寫「不要修改」就誤開 PR。
   // 只有明確要求修改/修復/重構/commit/PR 時，才進入可提交變更流程。
-  const reportRequested = reportMode === true || /完整報告|詳細報告|產生報告|生成報告|審查報告|audit report|full report/i.test(question);
+  const reportRequested = reportMode === true || /完整報告|詳細報告|產生報告|生成報告|審查|檢查|分析|review|audit|full report/i.test(question);
   const modificationRequested = /修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|commit|pull request|draft pr|fix|change|refactor|delete|remove|add|replace/i.test(question);
   const analysisOnly = dryRun === true || (reportRequested && !modificationRequested);
 
