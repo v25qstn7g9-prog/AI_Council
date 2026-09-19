@@ -498,7 +498,26 @@ async function run(){
       addCard("b","AI B · Reviewer",d.b||"");
       // GitHub 工程模式也必須走 renderArtifact，否則後端雖然已產生
       // artifact.report，前端只顯示 d.final，永遠不會建立報告下載按鈕。
-      if(d.artifact)renderArtifact(d.artifact);
+      if(d.artifact){
+        // 前端最後一道完整性防線：即使後端/舊部署只回傳報告標題，
+        // 下載檔也至少保留本次 AI A / AI B 的實際審查內容。
+        if(typeof d.artifact.report==="string"){
+          const reportText=d.artifact.report.trim();
+          const sectionCount=(reportText.match(/^##\\s+/gm)||[]).length;
+          if(reportText.length<1200||sectionCount<6){
+            d.artifact.report=[
+              "# AI Council 工程 Audit Report",
+              "## 1. 報告產生狀態\\n最終 Audit Report 回傳內容不完整；以下自動保留本次雙 AI 實際審查結果，避免下載到只有標題的空報告。",
+              "## 2. AI A · 主工程師審查\\n"+(d.a||"（無內容）"),
+              "## 3. AI B · Reviewer 審查\\n"+(d.b||"（無內容）"),
+              "## 4. 最終整合原始回覆\\n"+(d.final||reportText||"（無內容）"),
+              "## 5. 待驗證事項\\n後端完整報告生成未達完整度門檻，需依上方雙 AI 證據進一步核對。",
+              "## 6. 結論\\n本檔保留本次實際工程審查內容，不將只有標題的輸出視為完整 Audit Report。"
+            ].join("\\n\\n");
+          }
+        }
+        renderArtifact(d.artifact);
+      }
       else if(d.final)addCard("judge","最終整合",d.final);
       if(d.action==="pull_request"){
         addCard("judge","🐙 GitHub PR",`已建立 Draft PR #${d.pr?.number||""}\n${d.pr?.url||""}\n\nBranch：${d.branch}\n修改：${(d.changedFiles||[]).join("、")}`);
