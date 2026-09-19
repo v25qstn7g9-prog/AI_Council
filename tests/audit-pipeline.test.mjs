@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {runAuditBatch,runAuditBatchFallback,synthesizeAuditEvidence} from "../src/debate.js";
-import {auditGroup,buildDeterministicAuditReport,planAuditBatches} from "../src/githubEngineering.js";
+import {auditGroup,buildDeterministicAuditReport,planAuditBatches,scanDeterministicIntegrityFindings} from "../src/githubEngineering.js";
 
 const report=[
   "# Audit Report",
@@ -15,6 +15,7 @@ const report=[
   "## 效能與可維護性\n待量測。",
   "## 測試部署風險\n未部署。",
   "## 修正建議\n先補測試。",
+  "## AI A / AI B 分歧與 AI C 裁決\nA/B 意見依直接證據裁決。",
   "## 最終結論\n僅依靜態證據。",
 ].join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
 
@@ -57,6 +58,14 @@ assert.equal(auditGroup("functions/health-check.js"),"01-runtime-routing");
 const planned=planAuditBatches(Array.from({length:6},(_,i)=>({path:`g${i}.js`,content:"x".repeat(40000),group:`0${i+1}-group`})));
 assert.equal(planned.batches.length,3);
 assert.deepEqual(planned.batches.map(x=>x.files.length),[2,2,2]);
+const integrity=scanDeterministicIntegrityFindings([{path:"index.html",content:"}\nconst d = new Date(`function () { [native code] }T00:00:00Z`);\n// unfinished"}]);
+assert.deepEqual(integrity.map(x=>x.id),["HTML_ROOT_INCOMPLETE","NATIVE_CODE_LITERAL"]);
+{
+  const env=envWith(async()=>({response:report}));
+  const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(rejected.complete,false);
+  assert.deepEqual(rejected.missingFindingIds,["HTML_ROOT_INCOMPLETE","NATIVE_CODE_LITERAL"]);
+}
 const deterministic=buildDeterministicAuditReport({fullName:"o/r",base:"main",question:"審核",findings:[],coverage:{pct:100,count:1,total:1,skipped:[]}});
 assert.match(deterministic,/Audit Coverage：100%/);
 console.log("audit-pipeline tests: ok");
