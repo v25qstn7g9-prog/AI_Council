@@ -205,7 +205,8 @@ async function fetchRepoFiles(env, fullName, base) {
             `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(entry.sha)}`
           );
           return { entry, blob };
-        } catch {
+        } catch (e) {
+          console.warn(`讀取 ${entry.path} 檔案失敗：${e.message}`);
           return { entry, blob: null };
         }
       })
@@ -249,7 +250,7 @@ function taskExplicitlyRequestsDeletion(task, name) {
   const t = String(task || "").toLowerCase();
   const n = String(name || "").toLowerCase();
   if (n && t.includes(n)) return true;
-  return /\\b(delete|remove|rename|refactor|rewrite|replace|obsolete|移除|刪除|刪掉|重命名|重新命名|重構|改寫|替換|淘汰)\\b/i.test(t);
+  return /\b(delete|remove|rename|refactor|rewrite|replace|obsolete|移除|刪除|刪掉|重命名|重新命名|重構|改寫|替換|淘汰)\b/i.test(t);
 }
 
 function validateProposedFiles(proposed, originalMap, task = "") {
