@@ -1,6 +1,10 @@
-# AI 圓桌 v4.8.1｜Efficient ABC Three-Layer Audit
+# AI 圓桌 v4.9.0｜Evidence Verdict Gate
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.9.0：Evidence Verdict Gate
+
+在模型裁決之前加入 Deterministic Integrity Gate：每個完整 GitHub blob 都會記錄行數、字元數與 `Source complete: yes`；根 `index.html` 缺少 HTML 文件結構、或原始碼出現 `function () { [native code] }` 等可機械確認的問題會生成固定 finding ID。AI C 必須在「已證實問題」保留所有 ID，否則報告被拒絕並重試。正式報告新增 A/B 分歧與 C 裁決章節、C 模型與嘗試次數；存在 critical finding 時禁止輸出「整體品質良好／無重大問題」。
 
 ## v4.8.1：Quota-Efficient ABC Audit
 
