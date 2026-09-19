@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {runAuditBatch,runAuditBatchFallback,synthesizeAuditEvidence} from "../src/debate.js";
-import {auditGroup,buildDeterministicAuditReport,planAuditBatches,scanDeterministicIntegrityFindings} from "../src/githubEngineering.js";
+import {auditGroup,buildDeterministicAuditReport,planAuditBatches,scanDeterministicIntegrityFindings,classifyGitHubTask} from "../src/githubEngineering.js";
 
 const report=[
   "# Audit Report",
@@ -118,5 +118,14 @@ const reportSectionsBase=[
   const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
   assert.equal(rejected.complete,false,"標題編號為 13 時，結論本身淡化 critical finding 仍應被擋下");
 }
+
+// v4.9.3 regression：classifyGitHubTask 的英文關鍵字必須有單詞邊界，
+// 不得把 "address"、"additional" 這類詞裡藏的 "add" 誤判成修改請求，
+// 導致純分析／報告任務被導向修改流程而不產生 Audit Report。
+assert.equal(classifyGitHubTask("請幫我分析這個 repo 的 address 欄位格式是否正確").modificationRequested,false,"\"address\" 不應被誤判為修改請求");
+assert.equal(classifyGitHubTask("請幫我看看有沒有 additional 的安全性問題").modificationRequested,false,"\"additional\" 不應被誤判為修改請求");
+assert.equal(classifyGitHubTask("查核我的程式碼").analysisOnly,true,"純查核任務應進入 analysisOnly");
+assert.equal(classifyGitHubTask("請 fix 這個 bug").modificationRequested,true,"獨立單字 fix 仍應被視為修改請求");
+assert.equal(classifyGitHubTask("幫我 add 一個新功能").modificationRequested,true,"獨立單字 add 仍應被視為修改請求");
 
 console.log("audit-pipeline tests: ok");

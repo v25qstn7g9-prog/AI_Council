@@ -773,7 +773,7 @@ function mechanicalFixGate(proposed, originalMap, allowedScope) {
 function slugify(text) {
   const s = String(text || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/[^a-z0-9一-鿿]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
   return s || "code-change";
@@ -890,7 +890,9 @@ export async function listGitHubRepos(env) {
 
 export function classifyGitHubTask(question, {reportMode=false,dryRun=false}={}) {
   const text=String(question||"");
-  const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|commit|pull request|draft pr|fix|change|refactor|delete|remove|add|replace/i.test(text);
+  // 英文關鍵字必須加單詞邊界，否則像 "address"、"additional" 這類詞
+  // 裡藏的 "add" 會被誤判成修改請求，導致純分析／報告任務被導向修改流程。
+  const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|\bcommit\b|pull request|draft pr|\bfix\b|\bchange\b|\brefactor\b|\bdelete\b|\bremove\b|\badd\b|\breplace\b/i.test(text);
   const reportRequested=modificationRequested || reportMode===true || /完整報告|詳細報告|產生報告|生成報告|察核|查核|稽核|審核|審查|檢查|分析|報告|review|audit|full report/i.test(text);
   const analysisOnly=dryRun===true || (reportRequested&&!modificationRequested);
   return {modificationRequested,reportRequested,analysisOnly};
