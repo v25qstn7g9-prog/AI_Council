@@ -381,18 +381,37 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     ].join("\n")
   };
 
-  const finalResult=await runEngineeringCouncil({
+  // v4.4：Full Repo Audit 已經完成逐批完整檔案審查，最終階段只需要整合證據。
+  // 不再先跑一次完整 A/B + Report pipeline；那會重複消耗 context/token，並讓報告更容易超時或不完整。
+  const primary=await synthesizeAuditEvidence({
     env,
-    question:
-      `【Full Repository Batch Audit 最終整合】\nRepository：${fullName}\nBase：${base}\n原始任務：${question}\n\n下面附件不是原始碼，而是各批完整檔案審查證據與 Coverage Manifest。請產生最終完整工程 Audit Report。必須在執行摘要與檢查範圍明確寫 Audit Coverage ${coverage.pct}%（${coverage.count}/${coverage.total} readable files）。只有批次證據支持的問題才能列為已證實；跨批衝突或證據不足一律列待驗證。不得聲稱未列在 Manifest 的檔案已審查。不得產生修改檔案。`,
+    question,
     rawFiles:[manifest,...findings],
-    rawImages:[],
-    webSearch:false,
-    analysisOnly:true,
-    reportMode:true,
+    coverage,
   });
+  const finalResult={
+    version:"4.4.0",
+    a:"",
+    b:"",
+    final:primary.report||"",
+    reportGenerationFailed:!primary.complete,
+    artifact:{
+      summary:primary.complete ? "Full Repo Evidence Synthesis 已完成。" : "Primary Evidence Synthesis 未達完整度門檻。",
+      report:primary.report||"",
+      verified:[],
+      inferences:[],
+      pending:primary.complete ? [] : ["Primary Evidence Synthesis 未完成，進入 compact rescue。"],
+      review:[],
+      instructions:[],
+      sources:[],
+      files:[],
+      synthesisSource:primary.source,
+      synthesisSections:primary.sectionCount,
+      synthesisLength:primary.length,
+    }
+  };
 
-  if (finalResult?.reportGenerationFailed) {
+  if (finalResult.reportGenerationFailed) {
     // v4.3：Rescue 不再遞迴呼叫完整 A/B Audit pipeline。
     // 直接把已完成的完整檔案 batch evidence 交給專用 synthesis，避免第二次又走同一個失敗路徑。
     const rescue=await synthesizeAuditEvidence({
@@ -668,6 +687,8 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
+      version:audit.result.version||"4.4.0",
+      reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
     };
   }
 
