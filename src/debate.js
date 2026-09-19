@@ -452,10 +452,11 @@ async function checkRateLimit(env, ip) {
   return { ok:true };
 }
 
-export async function runEngineeringCouncil({ env, question, rawFiles, rawImages, webSearch, analysisOnly = false }) {
+export async function runEngineeringCouncil({ env, question, rawFiles, rawImages, webSearch, analysisOnly = false, reportMode = false }) {
   const files = normalizeFiles(rawFiles);
   const images = Array.isArray(rawImages) ? rawImages.slice(0, MAX_IMAGES) : [];
   const q = question;
+  const reportRequested = reportMode === true || /完整報告|詳細報告|產生報告|生成報告|code review report|audit report|full report/i.test(q);
 
   const webSearchRequested = webSearch === true;
   const search = webSearchRequested
@@ -575,6 +576,7 @@ ${b}
 {
   "summary": "簡短結論",
   "rootCause": "根因；不確定就明確寫不確定",
+  "report": "若要求完整報告，請在此放完整可交付報告；否則留空",
   "verified": ["已被目前檔案直接支持的事實"],
   "inferences": ["合理推測"],
   "pending": ["仍需驗證事項"],
@@ -615,6 +617,7 @@ ${b}
       debug:[aResult.debug, bResult.debug, analysisResult.debug].filter(Boolean).join("\n") || undefined,
       filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
       reviewerTruncated:Boolean(reviewerContext.truncatedByBudget),
+    reportRequested,
       imageReports,
       webSearchRequested,
       search:{
@@ -626,10 +629,33 @@ ${b}
     };
   }
 
+  const reportInstruction = reportRequested
+    ? `
+【完整報告要求】
+這次使用者明確要求「完整報告」。不要把幾句摘要當成完整報告，也不要只列 3～5 個重點。
+必須產生一份可直接交付給工程師/主管閱讀的完整工程報告，內容至少包含：
+1. 執行摘要
+2. 專案範圍與本次實際檢查到的檔案
+3. 架構與程式碼結構
+4. 已證實問題（每項包含：檔案、位置、證據、影響、嚴重度）
+5. 推測問題（與已證實嚴格分開）
+6. 待驗證事項
+7. 安全性檢查
+8. 錯誤處理檢查
+9. 效能與可維護性檢查
+10. 測試/部署風險
+11. 修正建議與優先順序
+12. 最終結論
+報告必須以實際讀到的程式碼為證據，不得把 [TRUNCATED] 內容當完整檔案，不得虛構測試結果。
+`
+    : `【報告要求】本次沒有要求完整報告時，維持正常工程整合格式。`;
+
   const finalPrompt = `你現在是最終整合工程師。
 
 【任務】
 ${q}
+
+${reportInstruction}
 
 【可用專案檔案】
 ${projectContext || "（無附件）"}
@@ -651,6 +677,7 @@ ${b}
 {
   "summary": "簡短結論",
   "rootCause": "根因；若不確定要寫不確定",
+  "report": "若要求完整報告，請在此放完整可交付報告；否則留空",
   "verified": ["已被附件或 Web Search 來源直接支持的事實"],
   "inferences": ["合理推測；若沒有就空陣列"],
   "pending": ["仍需驗證的事項；若沒有就空陣列"],
@@ -863,7 +890,7 @@ ${target.content}
   }
 
   const finalText = artifact
-    ? [artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
+    ? [artifact.report, artifact.summary, artifact.rootCause].filter(Boolean).join("\n\n")
     : finalRaw;
 
   return {
