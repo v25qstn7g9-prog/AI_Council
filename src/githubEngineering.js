@@ -484,13 +484,15 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
         rawFiles:batch.files,
       });
       return {
-        ok:true,paths,skipped:[],
+        ok:true,paths,skipped:[],aOk:batchResult.aOk,bOk:batchResult.bOk,
         finding:{
           path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
           content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.text||""}`,
           size:0,
           truncated:false
-        }
+        },
+        aFinding:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.a||"本批 AI A 無輸出。"}`,
+        bFinding:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.b||"本批 AI B 無輸出。"}`
       };
     } catch (error) {
       const message=String(error?.message||"");
@@ -500,13 +502,15 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
           ? "模型額度或速率限制"
           : "模型服務未回應";
       return {
-        ok:false,paths:[],skipped:paths,
+        ok:false,paths:[],skipped:paths,aOk:false,bOk:false,
         finding:{
           path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
           content:`# Batch ${batch.id}: ${batch.group}\n\nStatus: 審查失敗（${reason}）。\n\nFiles not reviewed: ${paths.join(", ")}`,
           size:0,
           truncated:false
-        }
+        },
+        aFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI A：審查失敗（${reason}）。`,
+        bFinding:`# Batch ${batch.id}: ${batch.group}\n\nAI B：審查失敗（${reason}）。`
       };
     }
   });
@@ -515,6 +519,11 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     batchFailedPaths.push(...item.skipped);
     findings.push(item.finding);
   }
+
+  const aReviewedPaths=batchFindings.filter(x=>x.aOk).flatMap(x=>x.paths);
+  const bReviewedPaths=batchFindings.filter(x=>x.bOk).flatMap(x=>x.paths);
+  const aReport=batchFindings.map(x=>x.aFinding).join("\n\n---\n\n");
+  const bReport=batchFindings.map(x=>x.bFinding).join("\n\n---\n\n");
 
   const coverage=coverageLine(snapshot,reviewedPaths,[...plan.overflow,...batchFailedPaths]);
   const manifest={
@@ -528,6 +537,8 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       `Readable files discovered: ${coverage.total}`,
       `Files fully reviewed: ${coverage.count}`,
       `Audit Coverage: ${coverage.pct}%`,
+      `AI A Coverage: ${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,
+      `AI B Coverage: ${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,
       `Batch count: ${plan.batches.length}`,
       "Reviewed files:",
       ...reviewedPaths.map(p=>`- ${p}`),
@@ -554,9 +565,9 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.5.3",
-    a:"",
-    b:"",
+    version:"4.6.0",
+    a:aReport,
+    b:bReport,
     final:primary.report||"",
     reportGenerationFailed:!primary.complete,
     artifact:{
@@ -573,7 +584,9 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-evidence-v4.5.3",
+      pipelineVersion:"full-repo-dual-evidence-v4.6",
+      aReviewedFiles:aReviewedPaths,
+      bReviewedFiles:bReviewedPaths,
     }
   };
 
@@ -595,7 +608,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-evidence-v4.5.3",
+      pipelineVersion:"full-repo-dual-evidence-v4.6",
     };
   }
 
@@ -844,7 +857,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.5.3",
+      version:audit.result.version||"4.6.0",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
