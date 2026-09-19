@@ -1,6 +1,10 @@
-# AI 圓桌 v4.5.1｜Guaranteed Report Delivery
+# AI 圓桌 v4.5.2｜Mandatory Engineering Report
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.5.2：Mandatory Engineering Report
+
+GitHub 工程模式只要進入修改流程，不論任務是否包含「報告」關鍵字，都強制回傳一份依實際結果組裝的工程察核報告。新增「察核／查核／稽核／審核」語意辨識；修改流程不再要求模型同時輸出長篇報告與完整檔案，避免檔案或報告被截斷，最終報告統一由後端依掃描範圍、Gate、變更與 PR 結果建立。
 
 ## v4.5.1：Guaranteed Report Delivery
 
