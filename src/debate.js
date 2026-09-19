@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "3.14.0";
+const VERSION = "3.14.1";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -551,6 +551,18 @@ ${a}
   const b = bResult.text;
 
   if (analysisOnly && reportRequested) {
+    // Audit 證據鏈：只有「本輪收到的完整檔案」才能支撐語法/截斷/缺尾端等
+    // 高嚴重度結論。Reviewer 若因自己的 context budget 截斷，不得把該觀察
+    // 升級成已證實問題。
+    const completeAuditFiles = files.filter(f => !f.truncated).map(f => f.path);
+    const incompleteAuditFiles = files.filter(f => f.truncated).map(f => f.path);
+    const auditEvidenceManifest = [
+      "【Audit 證據清單】",
+      "完整檔案：" + (completeAuditFiles.length ? completeAuditFiles.join(", ") : "無"),
+      "不完整檔案：" + (incompleteAuditFiles.length ? incompleteAuditFiles.join(", ") : "無"),
+      "Reviewer context 是否因預算截斷：" + (reviewerContext.truncatedByBudget ? "是" : "否"),
+    ].join("\n");
+
     const reportPrompt = `你現在是資深軟體工程 Audit Lead。
 
 【使用者原始任務】
@@ -564,6 +576,8 @@ ${a}
 
 【AI B Reviewer 分析】
 ${b}
+
+${auditEvidenceManifest}
 
 這次唯一交付物是「完整工程 Audit Report」。
 請直接輸出一份完整的 Markdown 純文字報告，不要輸出 JSON、不要使用 JSON 欄位包住報告、不要輸出 FILE 區塊、不要修改程式。
@@ -602,6 +616,9 @@ ${b}
 8. 不要為了湊數量硬找問題。
 9. 如果目前沒有足夠證據確認重大問題，要明確說明。
 10. 完整報告比摘要重要；請產生真正可交給另一位工程師進行第二層審查的報告。
+11. 禁止聲稱「人工查閱／人工確認／實際執行／已部署驗證」，除非輸入資料明確提供這項證據。
+12. 對 Syntax Error、檔案中斷、缺少括號/函式結尾、無法編譯/部署等高嚴重度結論：只有【Audit 證據清單】列為完整的檔案，且報告能引用實際可見程式碼證據時，才能列入「已證實問題」；若來源只是 AI A/B 的文字、Reviewer 截斷 context 或 [TRUNCATED] 片段，一律降級為「待驗證」。
+13. AI A/B 的分析是待核對意見，不是獨立證據；若與完整原始碼證據衝突，以完整原始碼為準。
 `;
 
     const reportResult = await askA(env.AI, env, [
@@ -632,6 +649,8 @@ ${a}
 【AI B Reviewer 審查】
 ${b}
 
+${auditEvidenceManifest}
+
 必須直接寫實質內容，不可只輸出標題。至少包含：
 # AI Council 工程 Audit Report
 ## 1. 執行摘要
@@ -647,7 +666,7 @@ ${b}
 ## 11. AI A / AI B 交叉驗證
 ## 12. 最終結論
 
-規則：只能使用 A/B 已有證據；證據不足寫待驗證；不得虛構測試、部署或未讀取的程式碼。完整報告至少 1200 字元。`;
+規則：A/B 只是待核對意見，不是獨立證據。必須依 Audit 證據清單判斷檔案是否完整；任何 Syntax Error、檔案中斷、缺尾端、無法編譯/部署等主張，若沒有完整檔案中的直接證據，一律寫入待驗證，不得列為已證實。禁止虛構「人工查閱/人工確認/實際部署」。完整報告至少 1200 字元。`;
 
       const retryResult = await askA(env.AI, env, [
         { role:"system", content:"只輸出完整 Markdown 工程 Audit Report。禁止只回標題或摘要。" },
