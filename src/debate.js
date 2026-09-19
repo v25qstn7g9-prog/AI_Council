@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.5.2";
+const VERSION = "4.5.3";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -33,6 +33,7 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
 const PRIMARY_TIMEOUT_MS = 12000;
 const FALLBACK_TIMEOUT_MS = 60000;
+const AUDIT_BATCH_TIMEOUT_MS = 30000;
 
 function withTimeout(promise, ms, label) {
   return Promise.race([
@@ -218,10 +219,10 @@ async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35, tim
   }
 }
 
-async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
+async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
   const provider = normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare");
   try {
-    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "B");
+    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "B", timeoutMs);
   } catch (e) {
     if (provider === "cloudflare") {
       const key = await getSecret(env, "GEMINI_API_KEY");
@@ -551,10 +552,19 @@ ${context || "（無檔案）"}
 ## 效能與可維護性
 ## 待跨檔驗證
 重大問題必須指出檔案與可見證據；沒有證據就不要列為已證實。不要修改程式、不要輸出完整檔案。控制在 1800 字內。`;
-  const result = await askA(env.AI, env, [
+  const messages=[
     { role:"system", content:"你是大型 repository 的批次 Code Review 工程師。只根據完整可見原始碼建立證據。" },
     { role:"user", content:prompt },
-  ], 2600, 0.1, PRIMARY_TIMEOUT_MS);
+  ];
+  let result;
+  try {
+    // Qwen Reviewer 較快，且 80k 字元批次能落在其 context 預算內。
+    result=await askB(env.AI,env,messages,2200,0.1,AUDIT_BATCH_TIMEOUT_MS);
+  } catch (reviewerError) {
+    // Reviewer 不可用時改用主模型；兩者都失敗才由上層標示該批未審查。
+    result=await askA(env.AI,env,messages,2200,0.1,AUDIT_BATCH_TIMEOUT_MS);
+    result.debug=[result.debug,"Reviewer 失敗，批次已切換主模型"].filter(Boolean).join("；");
+  }
   return {
     text:String(result.text || "").trim(),
     source:result.source,
