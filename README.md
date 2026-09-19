@@ -1,4 +1,4 @@
-# AI 圓桌 v3.14.0｜Complete Source Audit
+# AI 圓桌 v3.14.1｜Evidence-Gated Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -113,6 +113,8 @@ wrangler deploy
 ```
 
 ## 版本
+
+- v3.14.1：Evidence-Gated Audit：新增完整檔案證據清單；AI A/B 意見不再視為獨立證據。Syntax Error、檔案中斷、缺少結尾、無法編譯/部署等高嚴重度結論，只有在完整檔案直接支持時才能列為已證實，否則自動要求降級為待驗證；並禁止報告虛構「人工查閱／人工確認／實際部署」。
 
 - v3.14.0：Complete Source Audit：修正 v3.13 仍沿用舊版 120k/24k analysis-only 隱藏 context 限制的問題。GitHub 完整檔案、normalizeFiles 與 AI A 主審查統一為單檔 120,000 / 總計 360,000 字元；不再把 GitHub 已完整取得的核心檔案在進入主審查前二次截斷。AI B 仍保留獨立 Reviewer context budget，作為第二視角而非假裝完整讀取。
 
