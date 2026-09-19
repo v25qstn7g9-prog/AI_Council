@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.8.1";
+const VERSION = "4.9.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
@@ -558,7 +558,7 @@ export async function runPostFixReview({ env, task, beforeFiles, afterFiles, dir
   return {approved:review.approve===true && review.bugFixed===true && review.directionFollowed===true && review.scopePreserved===true && !(review.regressions||[]).length,review,source:r.source};
 }
 
-export async function synthesizeAuditEvidence({ env, question, rawFiles, coverage }) {
+export async function synthesizeAuditEvidence({ env, question, rawFiles, coverage, requiredFindings=[] }) {
   const files=normalizeFiles(rawFiles);
   const context=buildProjectContext(files,[],{maxTotalChars:MAX_TOTAL_FILE_CHARS,maxFileChars:MAX_FILE_CHARS}).text;
   const coverageText=coverage ? `${coverage.pct}% (${coverage.count}/${coverage.total})` : "未提供";
@@ -569,20 +569,27 @@ export async function synthesizeAuditEvidence({ env, question, rawFiles, coverag
 ${context}
 
 請直接輸出完整 Markdown Audit Report，不要先做另一輪 A/B，不要輸出 JSON。
-至少包含 12 個 ## 章節：執行摘要、檢查範圍、架構、功能邏輯、已證實問題、推測問題、待驗證、安全性與錯誤處理、效能與可維護性、測試部署風險、修正建議、最終結論。
+至少包含 13 個 ## 章節：執行摘要、檢查範圍、架構、功能邏輯、已證實問題、推測問題、待驗證、安全性與錯誤處理、效能與可維護性、測試部署風險、修正建議、AI A / AI B 分歧與 AI C 裁決、最終結論。
 硬規則：
-1. 批次摘要中的 [TRUNCATED] 只表示 reviewer context 限制，絕不代表 GitHub 原始檔損壞。
-2. 沒有 runtime/deploy/test 證據，不得寫「運作良好、正常運作、已實測、部署成功、可正常編譯」。
-3. AI 意見不是證據；只保留批次摘要中明確引用完整檔案可見程式碼的 finding。
-4. 跨批次衝突或證據不足一律放待驗證。
-5. 必須明確寫 Audit Coverage ${coverageText}。
-6. 不得修改程式碼。`;
-  const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","最終結論"];
+1. Manifest 標示 Source complete: yes 的檔案是從 GitHub blob 完整取得。若它實際從程式片段開頭、在未完成註解結尾、或缺少 HTML 根結構，這是 repository 內容的直接證據；禁止解釋成 Reviewer context 截斷。
+2. 只有明確標示 [TRUNCATED] 的 reviewer 副本才是 context 限制。不得把完整 blob 的異常內容降級成「看不到前後文」。
+3. Deterministic Integrity Findings 是本地程式直接從完整 blob 擷取的證據，必須在「已證實問題」逐項保留 finding ID、檔案與證據，不得刪除或降級。
+4. 沒有 runtime/deploy/test 證據，不得寫「運作良好、正常運作、已實測、部署成功、可正常編譯」。
+5. AI 意見不是證據；只保留批次摘要中明確引用完整檔案可見程式碼的 finding。
+6. 跨批次衝突或證據不足一律放待驗證。
+7. 必須明確寫 Audit Coverage ${coverageText}。
+8. 若存在 critical deterministic finding，最終結論不得寫「整體品質良好、沒有重大問題、無重大問題」。
+9. 不得修改程式碼。`;
+  const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","AI A","AI B","AI C","最終結論"];
+  const requiredIds=(Array.isArray(requiredFindings)?requiredFindings:[]).map(x=>String(x?.id||"").trim()).filter(Boolean);
+  const hasCritical=(Array.isArray(requiredFindings)?requiredFindings:[]).some(x=>x?.severity==="critical");
   const inspect=(value)=>{
     const report=String(value||"").trim();
     const sectionCount=(report.match(/^##\s+/gm)||[]).length;
     const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
-    return {complete:report.length>=500&&sectionCount>=10&&headingHits>=9,report,sectionCount,headingHits,length:report.length};
+    const missingFindingIds=requiredIds.filter(id=>!report.includes(id));
+    const unsafeConclusion=hasCritical&&/整體(?:程式碼)?品質良好|沒有重大問題|無重大問題/.test(report);
+    return {complete:report.length>=500&&sectionCount>=13&&headingHits>=12&&!missingFindingIds.length&&!unsafeConclusion,report,sectionCount,headingHits,length:report.length,missingFindingIds,unsafeConclusion};
   };
   const messages=[
     {role:"system",content:"你是獨立的 AI C 證據裁決者。只整合 AI A 與 AI B 的批次證據，不新增事實；有衝突時降級為待驗證。"},
@@ -594,14 +601,23 @@ ${context}
   for (let attempt=1;attempt<=2;attempt++) {
     try {
       const retryNote=attempt===2
-        ? "\n\n這是第二次且最後一次產生報告。必須直接寫出至少 12 個具有實質內容的 ## 章節，不可只回標題、前言或 JSON。"
+        ? `\n\n這是第二次且最後一次產生報告。必須直接寫出至少 13 個具有實質內容的 ## 章節，不可只回標題、前言或 JSON。不得漏掉 Deterministic finding IDs：${requiredIds.join(", ")||"none"}。`
         : "";
       const r=await askCAudit(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?3800:3200,0.05,AUDIT_C_TIMEOUT_MS);
       source=r.source;
       const checked=inspect(r.text);
-      diagnostics.push(`AI C attempt ${attempt}: ${checked.length} chars / ${checked.sectionCount} sections / ${checked.headingHits} headings`);
+      diagnostics.push(`AI C attempt ${attempt}: ${checked.length} chars / ${checked.sectionCount} sections / ${checked.headingHits} headings / missing IDs ${checked.missingFindingIds.join(",")||"none"} / unsafe conclusion ${checked.unsafeConclusion?"yes":"no"}`);
       if (checked.length>best.length) best=checked;
-      if (checked.complete) return {...checked,source,debug:[r.debug,...diagnostics].filter(Boolean).join("；"),attempts:attempt};
+      if (checked.complete) {
+        const metadata=[
+          `> Pipeline: full-repo-abc-evidence-v4.9`,
+          `> AI C model: ${source}`,
+          `> AI C attempts: ${attempt}`,
+          `> Audit Coverage: ${coverageText}`,
+          `> Deterministic findings enforced: ${requiredIds.length}`,
+        ].join("\n");
+        return {...checked,report:`${metadata}\n\n${checked.report}`,source,debug:[r.debug,...diagnostics].filter(Boolean).join("；"),attempts:attempt};
+      }
     } catch (error) {
       diagnostics.push(`AI C attempt ${attempt}: ${sanitizeInternalError(error)}`);
     }
