@@ -548,7 +548,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.5.1",
+    version:"4.5.2",
     a:"",
     b:"",
     final:primary.report||"",
@@ -567,7 +567,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-evidence-v4.5.1",
+      pipelineVersion:"full-repo-evidence-v4.5.2",
     }
   };
 
@@ -589,7 +589,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-evidence-v4.5.1",
+      pipelineVersion:"full-repo-evidence-v4.5.2",
     };
   }
 
@@ -800,6 +800,14 @@ export async function listGitHubRepos(env) {
     }));
 }
 
+export function classifyGitHubTask(question, {reportMode=false,dryRun=false}={}) {
+  const text=String(question||"");
+  const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|commit|pull request|draft pr|fix|change|refactor|delete|remove|add|replace/i.test(text);
+  const reportRequested=modificationRequested || reportMode===true || /完整報告|詳細報告|產生報告|生成報告|察核|查核|稽核|審核|審查|檢查|分析|報告|review|audit|full report/i.test(text);
+  const analysisOnly=dryRun===true || (reportRequested&&!modificationRequested);
+  return {modificationRequested,reportRequested,analysisOnly};
+}
+
 export async function runGitHubEngineering(env, { repoFullName, base, task, dryRun = false, reportMode = false }) {
   const { fullName } = repoConfig(env, repoFullName);
   const safeBase = String(base || "main").trim();
@@ -812,9 +820,9 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
 
   // 「產生完整/詳細審查報告」本質上是分析交付，不應因使用者沒寫「不要修改」就誤開 PR。
   // 只有明確要求修改/修復/重構/commit/PR 時，才進入可提交變更流程。
-  const reportRequested = reportMode === true || /完整報告|詳細報告|產生報告|生成報告|審查|檢查|分析|review|audit|full report/i.test(question);
-  const modificationRequested = /修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|commit|pull request|draft pr|fix|change|refactor|delete|remove|add|replace/i.test(question);
-  const analysisOnly = dryRun === true || (reportRequested && !modificationRequested);
+  // v4.5.2：任何修改流程都必須附工程察核報告，不再依賴使用者是否剛好輸入
+  // 「審查／檢查」等特定關鍵字；並補齊台灣常用的察核／查核／稽核／審核。
+  const {modificationRequested,reportRequested,analysisOnly}=classifyGitHubTask(question,{reportMode,dryRun});
 
   if (analysisOnly && reportRequested) {
     const audit=await runFullRepoBatchAudit(env,fullName,safeBase,question);
@@ -830,7 +838,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.5.1",
+      version:audit.result.version||"4.5.2",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
@@ -859,7 +867,9 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     rawImages: [],
     webSearch: false,
     analysisOnly,
-    reportMode: reportRequested,
+    // 修改流程的報告由後端依實際結果確定性組裝，避免要求模型同時輸出
+    // 長篇報告與完整修正檔案而造成截斷。純分析 Audit 才交給 Audit pipeline。
+    reportMode: analysisOnly && reportRequested,
   });
 
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
