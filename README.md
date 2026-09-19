@@ -1,8 +1,12 @@
-# AI 圓桌 v4.3.0｜Deterministic Rescue Audit
+# AI 圓桌 v4.4.0｜Deterministic Rescue Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
-## v4.3.0：Deterministic Rescue Audit
+
+## v4.4.0：Single-pass Evidence Synthesis
+
+Full Repo Audit 完成逐批完整檔案審查後，最終報告改為直接由 Evidence Synthesizer 整合，不再重跑完整 A/B + Report pipeline。報告完整度改採章節結構門檻，而非單純 1200 字長度門檻，並回傳 synthesis section/length diagnostics。前端仍不得自行拼接 A/B 成正式報告。
+## v4.4.0：Deterministic Rescue Audit
 
 修正 v4.2 Rescue 仍遞迴進入同一套 A/B + Report pipeline 的問題。當 Primary Report 未達完整度門檻時，現在直接呼叫專用 Evidence Rescue Synthesizer，只使用 Full Repo manifest 與完整檔案 batch findings 合成報告，不再重新跑 A/B。Rescue 也禁止在沒有 runtime/deploy/test 證據時宣稱「運作良好／已實測／部署成功」。Primary 與 Rescue 都失敗時，明確標記 Audit 未完成，不輸出確定性結論。
 
