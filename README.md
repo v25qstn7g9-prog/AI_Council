@@ -1,4 +1,4 @@
-# AI 圓桌 v3.12.0｜GitHub 工程 Audit Report 強化版
+# AI 圓桌 v3.13.0｜Full Repo Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -113,6 +113,8 @@ wrangler deploy
 ```
 
 ## 版本
+
+- v3.13.0：Full Repo Audit 第一階段：GitHub 審查讀取上限提升至 30 檔、單檔 60,000 字元、總計 240,000 字元；後端分析同步提升單檔與總 context 預算，降低核心原始碼被過早標記 `[TRUNCATED]` 的情況。Reviewer 仍保留獨立 context budget，避免超出模型 context window；報告必須如實標示任何仍未完整讀取的檔案。
 
 - v3.12.0：強化 GitHub 工程 Audit Report：報告完整度驗證、自動重試與 fallback、GitHub 模式顯示使用者送出文字、180 秒工程等待時間、完整 Markdown 報告下載，以及 iOS 單一檔案下載修正。
 
