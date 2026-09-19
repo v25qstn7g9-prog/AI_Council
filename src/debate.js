@@ -13,10 +13,11 @@
  * }
  */
 
-const VERSION = "4.7.1";
+const VERSION = "4.8.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
+const MODEL_C_AUDIT = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const MAX_Q = 4000;
@@ -38,13 +39,18 @@ const AUDIT_BATCH_TIMEOUT_MS = 30000;
 const AUDIT_BATCH_RETRY_TIMEOUT_MS = 45000;
 const AUDIT_C_TIMEOUT_MS = 75000;
 
-function withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} 逾時（超過 ${Math.round(ms / 1000)} 秒未回應）`)), ms)
-    ),
-  ]);
+async function withTimeout(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer=setTimeout(() => reject(new Error(`${label} 逾時（超過 ${Math.round(ms / 1000)} 秒未回應）`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function sanitizeInternalError(value) {
@@ -260,6 +266,32 @@ async function askC(ai, env, messages, maxTokens = 1200, temperature = 0.2, time
     const text = await ask(ai, MODEL_C, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
     return { text, source: `Mistral Small 3.1（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗，AI C 已切換 Cloudflare 備援` };
   }
+}
+
+async function askCAudit(ai, env, messages, maxTokens = 1200, temperature = 0.1, timeoutMs = AUDIT_C_TIMEOUT_MS) {
+  const provider = normalizeProvider(env.COUNCIL_C_PROVIDER, "cloudflare");
+  if (provider !== "cloudflare") return askC(ai, env, messages, maxTokens, temperature, timeoutMs);
+  const failures=[];
+  try {
+    return {text:await ask(ai,MODEL_C_AUDIT,messages,maxTokens,temperature,Math.min(timeoutMs,60000)),source:MODEL_C_AUDIT};
+  } catch (error) {
+    failures.push(`Llama C: ${sanitizeInternalError(error)}`);
+  }
+  try {
+    return {text:await ask(ai,MODEL_C,messages,maxTokens,temperature,Math.min(timeoutMs,60000)),source:`${MODEL_C}（AI C 第二備援）`,debug:failures.join("；")};
+  } catch (error) {
+    failures.push(`Mistral C: ${sanitizeInternalError(error)}`);
+  }
+  const key=await getSecret(env,"GEMINI_API_KEY");
+  if (key) {
+    try {
+      const text=await askGemini(env,key,messages,maxTokens,temperature,FALLBACK_TIMEOUT_MS);
+      return {text,source:"Gemini 3.5（AI C 第三備援）",debug:failures.join("；")};
+    } catch (error) {
+      failures.push(`Gemini C: ${sanitizeInternalError(error)}`);
+    }
+  }
+  throw new Error(failures.join("；")||"AI C 所有模型均未回應");
 }
 
 async function searchWeb(env, query) {
@@ -547,7 +579,7 @@ ${context}
   const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","最終結論"];
   const inspect=(value)=>{
     const report=String(value||"").trim();
-    const sectionCount=(report.match(/^##\\s+/gm)||[]).length;
+    const sectionCount=(report.match(/^##\s+/gm)||[]).length;
     const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
     return {complete:report.length>=500&&sectionCount>=10&&headingHits>=9,report,sectionCount,headingHits,length:report.length};
   };
@@ -563,7 +595,7 @@ ${context}
       const retryNote=attempt===2
         ? "\n\n這是第二次且最後一次產生報告。必須直接寫出至少 12 個具有實質內容的 ## 章節，不可只回標題、前言或 JSON。"
         : "";
-      const r=await askC(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?5500:4500,0.05,AUDIT_C_TIMEOUT_MS);
+      const r=await askCAudit(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?5500:4500,0.05,AUDIT_C_TIMEOUT_MS);
       source=r.source;
       const checked=inspect(r.text);
       diagnostics.push(`AI C attempt ${attempt}: ${checked.length} chars / ${checked.sectionCount} sections / ${checked.headingHits} headings`);
@@ -637,6 +669,23 @@ ${context || "（無檔案）"}
     retried,
     filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
   };
+}
+
+export async function runAuditBatchFallback({env,question,rawFiles}) {
+  const files=normalizeFiles(rawFiles);
+  const context=buildProjectContext(files,[],{maxTotalChars:MAX_TOTAL_FILE_CHARS,maxFileChars:MAX_FILE_CHARS}).text;
+  const prompt=`你是 Full Repository Audit 的緊急批次審查員。A 與 B 都因服務問題未完成本批，現在只根據下列完整檔案保存證據。
+任務：${String(question||"").slice(0,MAX_Q)}
+
+【本批完整原始碼】
+${context||"（無檔案）"}
+
+用繁體中文輸出：## 架構與功能、## 已證實問題、## 推測問題、## 安全性與錯誤處理、## 效能與可維護性、## 待跨檔驗證。每個重大問題必須引用檔案與可見程式碼；控制在 1200 字內，不修改程式。`;
+  const r=await askCAudit(env.AI,env,[
+    {role:"system",content:"你是 AI C 緊急證據保存員。這不是最終裁決；只在 A/B 服務失敗時審查該批完整原始碼。"},
+    {role:"user",content:prompt}
+  ],1600,0.05,AUDIT_C_TIMEOUT_MS);
+  return {text:String(r.text||"").trim(),source:r.source,debug:r.debug,filesReceived:files.map(f=>f.path)};
 }
 
 export async function runEngineeringCouncil({ env, question, rawFiles, rawImages, webSearch, analysisOnly = false, reportMode = false }) {
