@@ -15,6 +15,10 @@ const MAX_TOTAL_FILE_CHARS = 360000;
 const MAX_BLOB_CONCURRENCY = 5;
 const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
+const MAX_REPO_AUDIT_FILES = 80;
+const MAX_REPO_AUDIT_CHARS = 2000000;
+const AUDIT_BATCH_TARGET_CHARS = 180000;
+const MAX_AUDIT_BATCHES = 12;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
   "md","txt","xml","yaml","yml","toml","csv","py","java","go","rs",
@@ -245,6 +249,162 @@ async function fetchRepoFiles(env, fullName, base) {
   return { files, treeEntryCount: entries.length, truncated: false };
 }
 
+
+function auditGroup(path) {
+  const p = String(path || "").toLowerCase();
+  if (/^(worker|src\/worker)|routes?|middleware/.test(p)) return "01-runtime-routing";
+  if (/ai|gemini|openai|anthropic|ask|chat|llm/.test(p)) return "02-ai";
+  if (/quote|news|dividend|market|stock|trade/.test(p)) return "03-domain-data";
+  if (/^public\/|\.html?$|\.css$|frontend|ui/.test(p)) return "04-frontend";
+  if (/test|spec|fixture/.test(p)) return "05-tests";
+  if (/package|readme|deploy|version|config|wrangler|vercel/.test(p)) return "06-build-docs";
+  return "07-other";
+}
+
+async function fetchFullRepoAuditFiles(env, fullName, base) {
+  const { owner, repo } = repoConfig(env, fullName);
+  const tree = await githubRequest(
+    env,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(base)}?recursive=1`
+  );
+  if (tree?.truncated) throw new Error("repository tree 遭 GitHub 截斷，無法宣稱 Full Repo Audit");
+
+  const entries = Array.isArray(tree?.tree) ? tree.tree.slice(0, MAX_TREE_ENTRIES) : [];
+  const allReadable = entries
+    .filter(x => x?.type === "blob" && isReadableSource(x.path, Number(x.size || 0)))
+    .sort((a,b) => auditGroup(a.path).localeCompare(auditGroup(b.path)) || a.path.localeCompare(b.path));
+
+  const selected = allReadable.slice(0, MAX_REPO_AUDIT_FILES);
+  const files = [];
+  const skipped = allReadable.slice(MAX_REPO_AUDIT_FILES).map(x => ({ path:x.path, reason:"file_limit" }));
+  let totalChars = 0;
+
+  for (let start=0; start<selected.length; start+=MAX_BLOB_CONCURRENCY) {
+    const part=selected.slice(start,start+MAX_BLOB_CONCURRENCY);
+    const blobs=await Promise.all(part.map(async entry => {
+      try {
+        const blob=await githubRequest(env,
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(entry.sha)}`);
+        return {entry,blob};
+      } catch { return {entry,blob:null}; }
+    }));
+    for (const {entry,blob} of blobs) {
+      if (blob?.encoding!=="base64" || typeof blob.content!=="string") {
+        skipped.push({path:entry.path,reason:"read_failed"});
+        continue;
+      }
+      const content=base64ToUtf8(blob.content);
+      if (!content) { skipped.push({path:entry.path,reason:"empty"}); continue; }
+      if (content.length>MAX_FILE_CHARS) { skipped.push({path:entry.path,reason:"single_file_too_large"}); continue; }
+      if (totalChars+content.length>MAX_REPO_AUDIT_CHARS) { skipped.push({path:entry.path,reason:"repo_budget"}); continue; }
+      totalChars+=content.length;
+      files.push({path:entry.path,content,size:Number(entry.size||0),truncated:false,group:auditGroup(entry.path)});
+    }
+  }
+  if (!files.length) throw new Error("找不到可供 Full Repo Audit 的完整文字原始碼");
+  return {
+    files, skipped, treeEntryCount:entries.length,
+    readableFileCount:allReadable.length, totalChars,
+    coverage: allReadable.length ? files.length/allReadable.length : 1
+  };
+}
+
+function planAuditBatches(files) {
+  const batches=[];
+  for (const file of files) {
+    let batch=batches[batches.length-1];
+    const mustNew=!batch || batch.group!==file.group ||
+      (batch.chars>0 && batch.chars+file.content.length>AUDIT_BATCH_TARGET_CHARS);
+    if (mustNew) {
+      batch={id:batches.length+1,group:file.group,chars:0,files:[]};
+      batches.push(batch);
+    }
+    batch.files.push(file);
+    batch.chars+=file.content.length;
+  }
+  // Hard cap is explicit: overflow remains visible as uncovered instead of being silently truncated.
+  return {
+    batches:batches.slice(0,MAX_AUDIT_BATCHES),
+    overflow:batches.slice(MAX_AUDIT_BATCHES).flatMap(b=>b.files.map(f=>f.path))
+  };
+}
+
+function coverageLine(snapshot, reviewedPaths, extraSkipped=[]) {
+  const reviewed=new Set(reviewedPaths);
+  const total=snapshot.readableFileCount;
+  const count=reviewed.size;
+  const pct=total ? Math.round((count/total)*1000)/10 : 100;
+  const skipped=[...snapshot.skipped.map(x=>x.path),...extraSkipped];
+  return {total,count,pct,skipped};
+}
+
+async function runFullRepoBatchAudit(env, fullName, base, question) {
+  const snapshot=await fetchFullRepoAuditFiles(env,fullName,base);
+  const plan=planAuditBatches(snapshot.files);
+  const findings=[];
+  const reviewedPaths=[];
+
+  for (const batch of plan.batches) {
+    const paths=batch.files.map(f=>f.path);
+    const batchResult=await runEngineeringCouncil({
+      env,
+      question:
+        `【Full Repo Batch Audit ${batch.id}/${plan.batches.length}】\nRepository：${fullName}\nBase：${base}\n群組：${batch.group}\n原始任務：${question}\n\n只審查本批完整檔案。輸出證據導向的局部審查：架構/功能、安全、錯誤處理、效能、已證實問題、推測問題、待跨檔驗證。每個問題必須寫檔案與可見證據。不要產生修改檔案，不要聲稱看過本批以外內容。`,
+      rawFiles:batch.files,
+      rawImages:[],
+      webSearch:false,
+      analysisOnly:true,
+      reportMode:false,
+    });
+    reviewedPaths.push(...paths);
+    findings.push({
+      path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
+      content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n## AI A\n${batchResult.a||""}\n\n## AI B\n${batchResult.b||""}\n\n## Batch synthesis\n${batchResult.final||""}`,
+      size:0,
+      truncated:false
+    });
+  }
+
+  const coverage=coverageLine(snapshot,reviewedPaths,plan.overflow);
+  const manifest={
+    path:"00-audit-manifest.md",
+    truncated:false,
+    size:0,
+    content:[
+      "# Full Repository Audit Manifest",
+      `Repository: ${fullName}`,
+      `Base: ${base}`,
+      `Readable files discovered: ${coverage.total}`,
+      `Files fully reviewed: ${coverage.count}`,
+      `Audit Coverage: ${coverage.pct}%`,
+      `Batch count: ${plan.batches.length}`,
+      "Reviewed files:",
+      ...reviewedPaths.map(p=>`- ${p}`),
+      "Unreviewed/skipped files:",
+      ...(coverage.skipped.length?coverage.skipped.map(p=>`- ${p}`):["- none"])
+    ].join("\n")
+  };
+
+  const finalResult=await runEngineeringCouncil({
+    env,
+    question:
+      `【Full Repository Batch Audit 最終整合】\nRepository：${fullName}\nBase：${base}\n原始任務：${question}\n\n下面附件不是原始碼，而是各批完整檔案審查證據與 Coverage Manifest。請產生最終完整工程 Audit Report。必須在執行摘要與檢查範圍明確寫 Audit Coverage ${coverage.pct}%（${coverage.count}/${coverage.total} readable files）。只有批次證據支持的問題才能列為已證實；跨批衝突或證據不足一律列待驗證。不得聲稱未列在 Manifest 的檔案已審查。不得產生修改檔案。`,
+    rawFiles:[manifest,...findings],
+    rawImages:[],
+    webSearch:false,
+    analysisOnly:true,
+    reportMode:true,
+  });
+
+  if (finalResult.artifact) {
+    finalResult.artifact.coverage=coverage;
+    finalResult.artifact.batchCount=plan.batches.length;
+    finalResult.artifact.reviewedFiles=reviewedPaths;
+    finalResult.artifact.skippedFiles=coverage.skipped;
+  }
+  return {result:finalResult,snapshot,coverage,batchCount:plan.batches.length,reviewedPaths};
+}
+
 function extractFunctionNames(source) {
   const names = new Set();
   const s = String(source || "");
@@ -433,6 +593,23 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const reportRequested = reportMode === true || /完整報告|詳細報告|產生報告|生成報告|審查|檢查|分析|review|audit|full report/i.test(question);
   const modificationRequested = /修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|commit|pull request|draft pr|fix|change|refactor|delete|remove|add|replace/i.test(question);
   const analysisOnly = dryRun === true || (reportRequested && !modificationRequested);
+
+  if (analysisOnly && reportRequested) {
+    const audit=await runFullRepoBatchAudit(env,fullName,safeBase,question);
+    return {
+      ok:true,
+      action:"analysis_only",
+      repository:fullName,
+      base:safeBase,
+      scannedFiles:audit.reviewedPaths,
+      auditCoverage:audit.coverage,
+      batchCount:audit.batchCount,
+      a:audit.result.a,
+      b:audit.result.b,
+      final:audit.result.final,
+      artifact:audit.result.artifact||null,
+    };
+  }
 
   const snapshot = await fetchRepoFiles(env, fullName, safeBase);
   const originalMap = new Map(snapshot.files.map(f => [f.path, f.content]));
