@@ -4,6 +4,7 @@
 import { onRequestPost as debateHandler } from "./debate.js";
 import { onRequestGet as usageHandler } from "./usage.js";
 import { runSelfReview } from "./selfReview.js";
+import { handleGitHubEngineering, handleGitHubRepos } from "./githubEngineering.js";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -92,6 +93,14 @@ export default {
 
     if (url.pathname === "/self-review" && request.method === "POST") {
       return handleSelfReviewRequest(request, env);
+    }
+
+    if (url.pathname === "/github/repos" && request.method === "GET") {
+      return handleGitHubRepos(request, env);
+    }
+
+    if (url.pathname === "/github/engineering" && request.method === "POST") {
+      return handleGitHubEngineering(request, env);
     }
 
     return env.ASSETS.fetch(request);
