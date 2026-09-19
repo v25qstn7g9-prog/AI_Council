@@ -535,73 +535,51 @@ async function run(){
       addCard("b",d.labels?.b||"AI B",d.b);
       chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
       if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
-      status.textContent=`完成 · ${d.version}`;
+      status.textContent="閒聊完成";
     }catch(e){
-      addCard("err","聊天失敗",e.message);status.textContent="失敗";
+      addCard("err","閒聊失敗",String(e?.message||e));
+      status.textContent="失敗";
     }finally{send.disabled=false}
     return;
   }
 
-  status.textContent="整理附件…";
+  status.textContent="工程會議進行中…";
   try{
     const files=buildPayloadFiles();
     const images=await buildPayloadImages();
-    status.textContent=`工程會議中 · ${files.length} 檔 + ${images.length} 圖…`;
-    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images})});
+    const controller = new AbortController();
+    let timeoutId = setTimeout(() => controller.abort(), 120000);
+    const r=await fetch("/debate",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({question,files,images,webSearch:webSearch.checked}),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
-
     if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
-    if(webSearch.checked)addCard("card","🌐 Web Search",searchLabel(d.search));
-    if(Array.isArray(d.imageReports)&&d.imageReports.length){
-      addCard("card","🖼️ 圖片分析",d.imageReports.map(x=>`${x.name}\n${x.text}`).join("\n\n"));
-    }
-    addCard("a",d.labels?.a||"主工程師 A",d.a);
-    addCard("b",d.labels?.b||"Reviewer B",d.b);
-    if(d.artifact)renderArtifact(d.artifact);
-    else renderArtifact({summary:d.final||"已完成",files:[],instructions:["⚠️ 這次沒有收到可下載的 AI 修正版檔案；下面提供目前上傳專案 ZIP。"]});
-    status.textContent=`完成 · ${d.version}`;
+    addCard("a",d.labels?.a||"AI A",d.a);
+    addCard("b",d.labels?.b||"AI B",d.b);
+    renderArtifact(d.artifact);
+    status.textContent=`完成 · ${searchLabel(d.search)}`;
   }catch(e){
-    addCard("err","工程會議失敗",e.message);status.textContent="失敗";
+    clearTimeout(timeoutId);
+    const msg = e?.name === "AbortError"
+      ? "工程會議超過 120 秒仍未完成；可能因專案檔案較大或 AI 思考時間較長，請減少上傳檔案數量或精簡問題後重試。"
+      : String(e?.message||e);
+    addCard("err","工程會議失敗",msg);
+    status.textContent="失敗";
   }finally{send.disabled=false}
 }
-const composerForm=$("#composerForm");
-let runBusy=false;
-function submitEngineering(e){
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
-  if(runBusy)return;
-  runBusy=true;
-  Promise.resolve(run()).finally(()=>{runBusy=false});
-}
-composerForm.addEventListener("submit",submitEngineering);
-send.addEventListener("click",submitEngineering);
-send.addEventListener("pointerup",e=>{
-  if(e.pointerType==="touch")submitEngineering(e);
-});
-q.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){
-    e.preventDefault();
-    submitEngineering(e);
-  }
-});
 
-// 優化：清除結果時同步釋放 Map 與 Blob 記憶體
+send.onclick=run;
+q.onkeydown=e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey||!e.shiftKey&&!navigator.userAgent.includes("Mobile"))){e.preventDefault();run()}};
 $("#clear").onclick=()=>{
-  chat.innerHTML="";
-  chatHistory=[];
-  workspace.clear();
-  renderFiles();
-  lastArtifact=null;
-  preparedZipBlob=null;
-  status.textContent="已清除歷史與工作區附件";
+  chat.innerHTML="";workspace.clear();renderFiles();
+  lastArtifact=null;chatHistory=[];preparedZipBlob=null;
+  status.textContent="v3.11.0 · 已清除";
 };
-
-let bgScrollY=0;
-q.addEventListener("focus",()=>{bgScrollY=window.scrollY;});
-q.addEventListener("blur",()=>{window.scrollTo(0,bgScrollY);});
-
-renderFiles();
 </script>
 </body>
 </html>
