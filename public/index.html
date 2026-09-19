@@ -4,15 +4,15 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0b0d12"/>
-<title>AI 圓桌 v4.6.0 · 工程協作</title>
+<title>AI 圓桌 v4.7.0 · ABC 三層審核</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
-:root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
+:root{--bg:#0b0d12;--panel:#151922;--line:#2b3140;--text:#f3f5f7;--sub:#9da6b8;--gold:#d9b45b;--a:#6ca8ff;--b:#be8cff;--c:#64d98b;--ok:#64d98b;--warn:#ffd27a;--bad:#ff7373}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .app{max-width:860px;margin:auto;padding:18px 14px 180px}header{padding:8px 2px 14px}h1{font-size:21px;margin:0 0 5px}.sub{font-size:12px;color:var(--sub)}
 .panel,.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:13px;margin:10px 0}
 .intro{font-size:13px;line-height:1.65;color:#d7dce7}.who{font-size:11px;font-weight:800;margin-bottom:7px;color:var(--sub)}
-.me{border-color:#4e5668}.a{border-color:#315c8e}.a .who{color:var(--a)}.b{border-color:#624486}.b .who{color:var(--b)}.judge{border-color:#806b37}.judge .who{color:var(--gold)}.err{border-color:#7b3434}.err .who{color:var(--bad)}
+.me{border-color:#4e5668}.a{border-color:#315c8e}.a .who{color:var(--a)}.b{border-color:#624486}.b .who{color:var(--b)}.c{border-color:#347153}.c .who{color:var(--c)}.judge{border-color:#806b37}.judge .who{color:var(--gold)}.err{border-color:#7b3434}.err .who{color:var(--bad)}
 pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font-size:13px;line-height:1.6}
 .drop{border:1px dashed #4b556a;border-radius:13px;padding:18px;text-align:center;color:var(--sub);cursor:pointer;background:#0f131a}.drop.drag{border-color:var(--gold);color:var(--gold)}
 .files{margin-top:10px;display:flex;flex-wrap:wrap;gap:7px}.chip{font-size:11px;padding:6px 8px;border-radius:10px;background:#10141b;border:1px solid var(--line);display:flex;gap:6px;align-items:center;max-width:100%}.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.chip button{padding:0;background:none;color:var(--bad);border:0}
@@ -56,7 +56,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="app">
 <header>
 <h1>AI 圓桌 · 工程協作</h1>
-<div class="sub">主工程師 × Reviewer × Vision × Web Search · 整包修軟體</div>
+<div class="sub">AI A 主審 × AI B 反方複審 × AI C 證據裁決</div>
 </header>
 
 <div class="panel">
@@ -105,7 +105,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
     <select id="githubRepo"><option value="">讀取可用 repository…</option></select>
     <input id="githubBase" type="text" maxlength="120" placeholder="base branch" value="main">
   </div>
-  <div class="small" style="margin-top:7px">雙 AI 會直接讀目前 GitHub branch。分析模式只讀取與分析，不建立 branch/commit/PR；確認要修時才會建立新 branch + Draft PR，不會直接改 main。</div>
+  <div class="small" style="margin-top:7px">AI A/B/C 會直接讀目前 GitHub branch。分析模式只讀取與分析，不建立 branch/commit/PR；確認要修時才會建立新 branch + Draft PR，不會直接改 main。</div>
 </div>
 </div>
 
@@ -116,7 +116,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <form id="composerForm" class="composer">
 <textarea id="q" maxlength="4000" placeholder="描述你要修什麼、哪裡怪怪的、不要動哪些地方…"></textarea>
 <div class="row">
-<span id="status" class="badge">v4.6.0 · Dual AI Audit</span>
+<span id="status" class="badge">v4.7.0 · ABC Three-Layer Audit</span>
 <div><button id="clear" type="button" class="secondary">清除結果</button> <button id="send" type="button">工程會議</button></div>
 </div>
 </form>
@@ -255,7 +255,7 @@ githubRepo.onchange=()=>{
 githubMode.onchange=async()=>{
   const on=githubMode.checked;
   githubControls.style.display=on?"block":"none";
-  githubState.textContent=on?"ON · 直接讀 GitHub + 雙 AI + Draft PR":"OFF · 直接讀 GitHub 實際原始碼";
+  githubState.textContent=on?"ON · GitHub + ABC 三層審核 + Draft PR":"OFF · 直接讀 GitHub 實際原始碼";
   githubState.className="badge "+(on?"ok":"");
   if(on){
     chatModeEl.checked=false;
@@ -301,7 +301,6 @@ function renderArtifact(artifact){
   const lines=[];
   let reportActions=null;
   if(typeof artifact.report==="string"&&artifact.report.trim()){
-    lines.push(artifact.report.trim());
     reportActions=document.createElement("div");
     reportActions.className="outputActions";
     const reportBtn=document.createElement("button");
@@ -336,7 +335,7 @@ function renderArtifact(artifact){
     reportActions.append(reportBtn);
     const reportHint=document.createElement("div");
     reportHint.className="small";
-    reportHint.textContent="可直接把這份 Markdown 報告交給另一個 AI 做第二層獨立審查。";
+    reportHint.textContent="完整 Markdown 報告已由 AI C 根據 A/B 證據裁決產生。";
     reportActions.append(reportHint);
   }
   if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
@@ -346,7 +345,7 @@ function renderArtifact(artifact){
   if(Array.isArray(artifact.sources)&&artifact.sources.length)lines.push("來源：\n- "+artifact.sources.join("\n- "));
   if(Array.isArray(artifact.review)&&artifact.review.length)lines.push("Reviewer 核對：\n- "+artifact.review.join("\n- "));
   if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
-  const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
+  const c=addCard("judge","最終報告",lines.join("\n\n")||artifact.summary||"已完成整合");
   if(reportActions)c.append(reportActions);
 
   if(Array.isArray(artifact.files)&&artifact.files.length){
@@ -497,6 +496,7 @@ async function run(){
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       addCard("a","AI A · 主工程師",d.a||"");
       addCard("b","AI B · Reviewer",d.b||"");
+      if(d.c)addCard("c","AI C · 證據裁決",d.c);
       // GitHub 工程模式也必須走 renderArtifact，否則後端雖然已產生
       // artifact.report，前端只顯示 d.final，永遠不會建立報告下載按鈕。
       if(d.artifact){
@@ -518,7 +518,7 @@ async function run(){
         }
         renderArtifact(d.artifact);
       }
-      else if(d.final)addCard("judge","最終整合",d.final);
+      else if(d.final)addCard("judge","最終報告",d.final);
       if(d.action==="pull_request"){
         addCard("judge","🐙 GitHub PR",`已建立 Draft PR #${d.pr?.number||""}\n${d.pr?.url||""}\n\nBranch：${d.branch}\n修改：${(d.changedFiles||[]).join("、")}`);
         status.textContent="完成 · Draft PR 已建立";
@@ -532,7 +532,7 @@ async function run(){
     }catch(e){
       clearTimeout(timeoutId);
       const msg = e?.name === "AbortError"
-        ? "工程會議超過 300 秒仍未完成；GitHub 可能已讀取成功，但完整雙 AI 審查與報告仍未完成，請稍後再試。"
+        ? "工程會議超過 300 秒仍未完成；GitHub 可能已讀取成功，但 ABC 三層審核與報告仍未完成，請稍後再試。"
         : String(e?.message||e);
       addCard("err","GitHub 工程模式失敗",msg);
       status.textContent="失敗";
@@ -583,6 +583,7 @@ async function run(){
     }
     addCard("a",d.labels?.a||"主工程師 A",d.a);
     addCard("b",d.labels?.b||"Reviewer B",d.b);
+    if(d.c)addCard("c",d.labels?.c||"AI C · 證據裁決",d.c);
     if(d.artifact)renderArtifact(d.artifact);
     else renderArtifact({summary:d.final||"已完成",files:[],instructions:["⚠️ 這次沒有收到可下載的 AI 修正版檔案；下面提供目前上傳專案 ZIP。"]});
     status.textContent=`完成 · ${d.version}`;
