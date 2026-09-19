@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.2.0";
+const VERSION = "4.3.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -499,6 +499,32 @@ export async function runPostFixReview({ env, task, beforeFiles, afterFiles, dir
   const r=await askB(env.AI,env,[{role:"system",content:"你是最終修正驗證 Reviewer，不參與原修正。證據不足就拒絕。"}, {role:"user",content:prompt}],2800,0.05,FALLBACK_TIMEOUT_MS);
   const review=extractJson(r.text)||{};
   return {approved:review.approve===true && review.bugFixed===true && review.directionFollowed===true && review.scopePreserved===true && !(review.regressions||[]).length,review,source:r.source};
+}
+
+export async function synthesizeAuditEvidence({ env, question, rawFiles, coverage }) {
+  const files=normalizeFiles(rawFiles);
+  const context=buildProjectContext(files,[],{maxTotalChars:MAX_TOTAL_FILE_CHARS,maxFileChars:MAX_FILE_CHARS}).text;
+  const coverageText=coverage ? `${coverage.pct}% (${coverage.count}/${coverage.total})` : "未提供";
+  const prompt=`你是 Evidence Rescue Audit Lead。輸入只包含 Full Repo Audit 的 manifest 與完整檔案批次證據摘要，不包含 repository 原始檔全文。
+【原始任務】${String(question||"").slice(0,MAX_Q)}
+【Coverage】${coverageText}
+【批次證據】
+${context}
+
+請直接輸出完整 Markdown Audit Report，不要先做另一輪 A/B，不要輸出 JSON。
+至少包含 12 個 ## 章節：執行摘要、檢查範圍、架構、功能邏輯、已證實問題、推測問題、待驗證、安全性與錯誤處理、效能與可維護性、測試部署風險、修正建議、最終結論。
+硬規則：
+1. 批次摘要中的 [TRUNCATED] 只表示 reviewer context 限制，絕不代表 GitHub 原始檔損壞。
+2. 沒有 runtime/deploy/test 證據，不得寫「運作良好、正常運作、已實測、部署成功、可正常編譯」。
+3. AI 意見不是證據；只保留批次摘要中明確引用完整檔案可見程式碼的 finding。
+4. 跨批次衝突或證據不足一律放待驗證。
+5. 必須明確寫 Audit Coverage ${coverageText}。
+6. 不得修改程式碼。`;
+  const r=await askA(env.AI,env,[{role:"system",content:"你是證據導向的 Audit Report 編輯器。只整合既有完整批次證據，不新增事實。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
+  const report=String(r.text||"").trim();
+  const sectionCount=(report.match(/^##\s+/gm)||[]).length;
+  const complete=report.length>=1200 && sectionCount>=10;
+  return {complete,report,source:r.source,debug:r.debug,sectionCount,length:report.length};
 }
 
 export async function runAuditBatch({ env, question, rawFiles }) {
