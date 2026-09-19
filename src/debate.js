@@ -13,11 +13,12 @@
  * }
  */
 
-const VERSION = "4.8.0";
+const VERSION = "4.8.1";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
-const MODEL_C_AUDIT = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const MODEL_C_AUDIT = MODEL_C;
+const MODEL_C_AUDIT_FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const MAX_Q = 4000;
@@ -275,12 +276,12 @@ async function askCAudit(ai, env, messages, maxTokens = 1200, temperature = 0.1,
   try {
     return {text:await ask(ai,MODEL_C_AUDIT,messages,maxTokens,temperature,Math.min(timeoutMs,60000)),source:MODEL_C_AUDIT};
   } catch (error) {
-    failures.push(`Llama C: ${sanitizeInternalError(error)}`);
+    failures.push(`Mistral C: ${sanitizeInternalError(error)}`);
   }
   try {
-    return {text:await ask(ai,MODEL_C,messages,maxTokens,temperature,Math.min(timeoutMs,60000)),source:`${MODEL_C}（AI C 第二備援）`,debug:failures.join("；")};
+    return {text:await ask(ai,MODEL_C_AUDIT_FALLBACK,messages,maxTokens,temperature,Math.min(timeoutMs,60000)),source:`${MODEL_C_AUDIT_FALLBACK}（AI C 第二備援）`,debug:failures.join("；")};
   } catch (error) {
-    failures.push(`Mistral C: ${sanitizeInternalError(error)}`);
+    failures.push(`Llama C: ${sanitizeInternalError(error)}`);
   }
   const key=await getSecret(env,"GEMINI_API_KEY");
   if (key) {
@@ -595,7 +596,7 @@ ${context}
       const retryNote=attempt===2
         ? "\n\n這是第二次且最後一次產生報告。必須直接寫出至少 12 個具有實質內容的 ## 章節，不可只回標題、前言或 JSON。"
         : "";
-      const r=await askCAudit(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?5500:4500,0.05,AUDIT_C_TIMEOUT_MS);
+      const r=await askCAudit(env.AI,env,[messages[0],{role:"user",content:prompt+retryNote}],attempt===1?3800:3200,0.05,AUDIT_C_TIMEOUT_MS);
       source=r.source;
       const checked=inspect(r.text);
       diagnostics.push(`AI C attempt ${attempt}: ${checked.length} chars / ${checked.sectionCount} sections / ${checked.headingHits} headings`);
@@ -636,8 +637,8 @@ ${context || "（無檔案）"}
   // v4.6：每批真正同時交給 A 與 B。批次間仍維持 concurrency=1，
   // 避免多批一起轟炸 provider；同批 A/B 並行可把整體等待控制在前端時限內。
   let [aSettled,bSettled]=await Promise.allSettled([
-    askA(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
-    askB(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
+    askA(env.AI,env,messages,1400,0.1,AUDIT_BATCH_TIMEOUT_MS),
+    askB(env.AI,env,messages,1400,0.1,AUDIT_BATCH_TIMEOUT_MS),
   ]);
   let retried=false;
   if (aSettled.status!=="fulfilled"&&bSettled.status!=="fulfilled") {
