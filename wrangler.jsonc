@@ -72,6 +72,7 @@
     "SELF_REVIEW_RATE_LIMIT": "1:21600",
     "COUNCIL_A_PROVIDER": "cloudflare",
     "COUNCIL_B_PROVIDER": "cloudflare",
+    "COUNCIL_C_PROVIDER": "cloudflare",
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
     "GITHUB_OWNER": "v25qstn7g9-prog",
     "GITHUB_REPO": "AI_Council",
