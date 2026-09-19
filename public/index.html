@@ -315,13 +315,10 @@ function renderArtifact(artifact){
         const isIOS=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(
           navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1
         );
-        if(isIOS&&navigator.share&&typeof File==="function"){
-          const file=new File([blob],filename,{type:"text/markdown"});
-          if(!navigator.canShare||navigator.canShare({files:[file]})){
-            await navigator.share({title:"AI Council 工程 Audit Report",files:[file]});
-            return;
-          }
-        }
+        // iOS 的 Web Share 對 Markdown 檔可能同時產生一份文字預覽/附件，
+        // 造成使用者儲存時看到 .md + 額外 .txt。報告下載改為單一路徑，
+        // 直接下載 Markdown，確保一次只建立一個檔案。
+        void isIOS;
       }catch(err){
         if(err?.name==="AbortError")return;
       }
