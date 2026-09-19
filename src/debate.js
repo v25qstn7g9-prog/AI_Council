@@ -458,6 +458,49 @@ async function checkRateLimit(env, ip) {
 
 // v4 Batch Audit 專用：每批只做一次模型呼叫，避免每個 batch 都跑 A/B/Final
 // 導致 Cloudflare Worker 長時間卡在「GitHub 讀取原始碼」。
+
+export async function runFixDirectionReview({ env, task, rawFiles, finding = "" }) {
+  const files=normalizeFiles(rawFiles);
+  const context=buildProjectContext(files,[],{
+    maxTotalChars:MAX_TOTAL_FILE_CHARS,
+    maxFileChars:MAX_FILE_CHARS,
+  }).text;
+  const prompt=`你是 Verified Fix Pipeline 的修正方向審查委員。現在禁止寫程式碼。
+【任務】${String(task||"").slice(0,MAX_Q)}
+【已驗證 Finding】${String(finding||"").slice(0,6000)}
+【完整相關原始碼】
+${context}
+
+請先確認原設計意圖與 call chain，再提出最多 3 個修正方向。只輸出 JSON：
+{"rootCause":"直接證據支持的根因","intent":"原設計意圖","options":[{"name":"方案","change":"修改範圍","risk":"副作用","verification":["可機械/行為驗證的成功條件"]}],"recommended":"建議方案名稱","why":"為何此方案最小且符合現有架構","scopeFiles":["只允許修改的檔案"],"successCriteria":["修正前先定義的成功條件"],"confidence":"high|medium|low","pending":[]}
+若根因或方向證據不足，confidence 必須 low，recommended 留空。`;
+  const a=await askA(env.AI,env,[{role:"system",content:"你只決定修正方向，不寫程式。優先最小變更、保留原架構、可驗證、低回歸風險。"}, {role:"user",content:prompt}],3200,0.1,FALLBACK_TIMEOUT_MS);
+  const b=await askB(env.AI,env,[{role:"system",content:"你是反方 Reviewer。專門找修正方向的錯誤假設、副作用、相容性與回歸風險；禁止寫程式。"}, {role:"user",content:`請審查以下 Fix Direction。若方向不安全或證據不足，明確否決。\n\n${a.text}`}],2200,0.1,FALLBACK_TIMEOUT_MS);
+  const direction=extractJson(a.text)||{};
+  const reviewer=String(b.text||"");
+  const rejected=/否決|不通過|證據不足|unsafe|reject/i.test(reviewer);
+  const approved=direction.confidence==="high" && Boolean(direction.recommended) && Array.isArray(direction.scopeFiles) && direction.scopeFiles.length>0 && !rejected;
+  return {approved,direction,reviewer,aSource:a.source,bSource:b.source};
+}
+
+export async function runPostFixReview({ env, task, beforeFiles, afterFiles, direction }) {
+  const before=normalizeFiles(beforeFiles);
+  const after=normalizeFiles(afterFiles);
+  const beforeContext=buildProjectContext(before,[],{maxTotalChars:MAX_TOTAL_FILE_CHARS,maxFileChars:MAX_FILE_CHARS}).text;
+  const afterContext=buildProjectContext(after,[],{maxTotalChars:MAX_TOTAL_FILE_CHARS,maxFileChars:MAX_FILE_CHARS}).text;
+  const prompt=`你是 Before/After Regression Reviewer。
+【任務】${String(task||"").slice(0,MAX_Q)}
+【已核准方向】${JSON.stringify(direction).slice(0,8000)}
+【修改前】${beforeContext}
+【修改後】${afterContext}
+只輸出 JSON：
+{"bugFixed":true,"directionFollowed":true,"scopePreserved":true,"regressions":[],"verification":["已能由程式碼確認的成功條件"],"pending":[],"approve":true}
+只有 bugFixed、directionFollowed、scopePreserved 都能由內容支持且沒有已知 regression 才 approve=true。`;
+  const r=await askB(env.AI,env,[{role:"system",content:"你是最終修正驗證 Reviewer，不參與原修正。證據不足就拒絕。"}, {role:"user",content:prompt}],2800,0.05,FALLBACK_TIMEOUT_MS);
+  const review=extractJson(r.text)||{};
+  return {approved:review.approve===true && review.bugFixed===true && review.directionFollowed===true && review.scopePreserved===true && !(review.regressions||[]).length,review,source:r.source};
+}
+
 export async function runAuditBatch({ env, question, rawFiles }) {
   const files = normalizeFiles(rawFiles);
   const context = buildProjectContext(files, [], {
