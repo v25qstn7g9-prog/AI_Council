@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {runAuditBatch,runAuditBatchFallback,synthesizeAuditEvidence} from "../src/debate.js";
-import {auditGroup,buildDeterministicAuditReport} from "../src/githubEngineering.js";
+import {auditGroup,buildDeterministicAuditReport,planAuditBatches} from "../src/githubEngineering.js";
 
 const report=[
   "# Audit Report",
@@ -25,16 +25,16 @@ function envWith(run){return {COUNCIL_A_PROVIDER:"cloudflare",COUNCIL_B_PROVIDER
   const env=envWith(async(model)=>{calls.push(model);return {response:report};});
   const result=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1}});
   assert.equal(result.complete,true);
-  assert.equal(calls[0],"@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+  assert.equal(calls[0],"@cf/mistralai/mistral-small-3.1-24b-instruct");
   assert.equal(result.attempts,1);
 }
 
 {
   const calls=[];
-  const env=envWith(async(model)=>{calls.push(model);if(model.includes("llama-3.3"))throw new Error("busy");return {response:report};});
+  const env=envWith(async(model)=>{calls.push(model);if(model.includes("mistral-small"))throw new Error("busy");return {response:report};});
   const result=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1}});
   assert.equal(result.complete,true);
-  assert.deepEqual(calls.slice(0,2),["@cf/meta/llama-3.3-70b-instruct-fp8-fast","@cf/mistralai/mistral-small-3.1-24b-instruct"]);
+  assert.deepEqual(calls.slice(0,2),["@cf/mistralai/mistral-small-3.1-24b-instruct","@cf/meta/llama-3.3-70b-instruct-fp8-fast"]);
 }
 
 {
@@ -49,11 +49,14 @@ function envWith(run){return {COUNCIL_A_PROVIDER:"cloudflare",COUNCIL_B_PROVIDER
 {
   const env=envWith(async(model)=>({response:`## 架構與功能\n${model}\n## 已證實問題\n無\n## 推測問題\n無\n## 安全性與錯誤處理\nOK\n## 效能與可維護性\nOK\n## 待跨檔驗證\n無`}));
   const result=await runAuditBatchFallback({env,question:"審核",rawFiles:[{path:"health.js",content:"export const ok=true;"}]});
-  assert.match(result.source,/llama-3\.3/);
+  assert.match(result.source,/mistral-small/);
   assert.match(result.text,/已證實問題/);
 }
 
 assert.equal(auditGroup("functions/health-check.js"),"01-runtime-routing");
+const planned=planAuditBatches(Array.from({length:6},(_,i)=>({path:`g${i}.js`,content:"x".repeat(40000),group:`0${i+1}-group`})));
+assert.equal(planned.batches.length,3);
+assert.deepEqual(planned.batches.map(x=>x.files.length),[2,2,2]);
 const deterministic=buildDeterministicAuditReport({fullName:"o/r",base:"main",question:"審核",findings:[],coverage:{pct:100,count:1,total:1,skipped:[]}});
 assert.match(deterministic,/Audit Coverage：100%/);
 console.log("audit-pipeline tests: ok");
