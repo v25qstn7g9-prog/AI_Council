@@ -93,7 +93,7 @@ function isReadableSource(path, size = 0) {
 
 function isWritablePath(path) {
   const p = safePath(path);
-  if (!p || DENIED_EXACT.has(p)) return false;
+  if (!p || DENIED_WRITE_EXACT.has(p)) return false;
   if (DENIED_PREFIXES.some(prefix => p.startsWith(prefix))) return false;
   if (p.startsWith(".github/")) return false;
   if (p.includes("/.env.") || p.endsWith("/.env")) return false;
