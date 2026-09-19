@@ -105,7 +105,7 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
     <select id="githubRepo"><option value="">讀取可用 repository…</option></select>
     <input id="githubBase" type="text" maxlength="120" placeholder="base branch" value="main">
   </div>
-  <div class="small" style="margin-top:7px">雙 AI 會直接讀目前 GitHub branch，討論後建立新 branch + Draft PR；不會直接改 main。</div>
+  <div class="small" style="margin-top:7px">雙 AI 會直接讀目前 GitHub branch。分析模式只讀取與分析，不建立 branch/commit/PR；確認要修時才會建立新 branch + Draft PR，不會直接改 main。</div>
 </div>
 </div>
 
@@ -433,7 +433,16 @@ async function run(){
     addCard("card","🐙 GitHub",`Repository：${repoName}\nBase：${base}`);
     status.textContent="GitHub 讀取原始碼…";
     try{
-      const r=await fetch("/github/engineering",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repoFullName:repoName,base,task:question})});
+      const dryRun = /不要(?:任何)?修改|不要修改|只分析|純分析|分析即可|不要建立 PR|不要建立PR|不要產生 PR|不要產生PR/i.test(question);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(()=>controller.abort(), 90000);
+      const r=await fetch("/github/engineering",{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun}),
+        signal:controller.signal
+      });
+      clearTimeout(timeoutId);
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       addCard("a","AI A · 主工程師",d.a||"");
@@ -442,12 +451,18 @@ async function run(){
       if(d.action==="pull_request"){
         addCard("judge","🐙 GitHub PR",`已建立 Draft PR #${d.pr?.number||""}\n${d.pr?.url||""}\n\nBranch：${d.branch}\n修改：${(d.changedFiles||[]).join("、")}`);
         status.textContent="完成 · Draft PR 已建立";
+      }else if(d.action==="analysis_only"){
+        addCard("card","🐙 GitHub","分析完成；依本次要求不建立 branch、commit 或 PR。");
+        status.textContent="完成 · 僅分析，未修改 GitHub";
       }else{
         addCard("card","🐙 GitHub","AI 判定這次沒有需要提交的修改。");
         status.textContent="完成 · 沒有需要修改";
       }
     }catch(e){
-      addCard("err","GitHub 工程模式失敗",String(e.message||e));
+      const msg = e?.name === "AbortError"
+        ? "工程會議超過 90 秒仍未完成；GitHub 連線本身正常，這次分析可能太大，請縮小任務範圍後再試。"
+        : String(e?.message||e);
+      addCard("err","GitHub 工程模式失敗",msg);
       status.textContent="失敗";
     }finally{send.disabled=false}
     return;
@@ -505,41 +520,13 @@ async function run(){
   }finally{send.disabled=false}
 }
 const composerForm=$("#composerForm");
-let sendGestureHandled=false;
-function triggerSendFromTouch(e){
-  if(send.disabled)return;
-  if(e?.cancelable)e.preventDefault();
-  sendGestureHandled=true;
-  run();
-  setTimeout(()=>{sendGestureHandled=false},700);
-}
-
-send.addEventListener("pointerdown",e=>{
-  if(send.disabled)return;
-  if(e.pointerType!=="mouse"){
-    triggerSendFromTouch(e);
-  }
-});
-
 composerForm.addEventListener("submit",e=>{
   e.preventDefault();
-  if(sendGestureHandled)return;
   run();
-});
-send.addEventListener("touchend",e=>{
-  if(send.disabled)return;
-  if(e.cancelable)e.preventDefault();
-  if(!sendGestureHandled)triggerSendFromTouch(e);
-},{passive:false});
-send.addEventListener("pointerup",e=>{
-  if(e.pointerType!=="mouse" && !sendGestureHandled){
-    if(e.cancelable)e.preventDefault();
-    triggerSendFromTouch(e);
-  }
 });
 send.addEventListener("click",e=>{
-  if(sendGestureHandled){e.preventDefault();return;}
-  run();
+  // submit event handles the actual send; prevent iOS duplicate gesture paths.
+  e.preventDefault();
 });
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 
