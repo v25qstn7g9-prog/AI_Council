@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "3.14.1";
+const VERSION = "4.0.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -322,9 +322,12 @@ function normalizeFiles(raw) {
     const path = String(f?.path || "").replace(/^\/+/, "").slice(0,220);
     if (!path) continue;
     let content = typeof f?.content === "string" ? f.content : "";
+    const originalLength = content.length;
     content = content.slice(0, Math.min(MAX_FILE_CHARS, Math.max(0, MAX_TOTAL_FILE_CHARS-used)));
     used += content.length;
-    out.push({ path, content, truncated: Number(f?.size||0) > content.length || content.length >= MAX_FILE_CHARS });
+    // GitHub tree size 是 UTF-8 bytes，JS content.length 是 UTF-16 code units，不能直接比較。
+    // truncated 只由上游明確標記或本函式實際切割判定，避免完整中文檔被誤標截斷。
+    out.push({ path, content, truncated: Boolean(f?.truncated) || content.length < originalLength });
     if (used >= MAX_TOTAL_FILE_CHARS) break;
   }
   return out;
