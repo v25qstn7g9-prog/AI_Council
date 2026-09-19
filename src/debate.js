@@ -455,6 +455,40 @@ async function checkRateLimit(env, ip) {
   return { ok:true };
 }
 
+
+// v4 Batch Audit 專用：每批只做一次模型呼叫，避免每個 batch 都跑 A/B/Final
+// 導致 Cloudflare Worker 長時間卡在「GitHub 讀取原始碼」。
+export async function runAuditBatch({ env, question, rawFiles }) {
+  const files = normalizeFiles(rawFiles);
+  const context = buildProjectContext(files, [], {
+    maxTotalChars: MAX_TOTAL_FILE_CHARS,
+    maxFileChars: MAX_FILE_CHARS,
+  }).text;
+  const prompt = `你是 Full Repository Audit 的批次審查工程師。
+任務：${String(question || "").slice(0, MAX_Q)}
+
+【本批完整原始碼】
+${context || "（無檔案）"}
+
+只審查本批實際提供的完整檔案。用繁體中文輸出精簡、證據導向的 Markdown：
+## 架構與功能
+## 已證實問題
+## 推測問題
+## 安全性與錯誤處理
+## 效能與可維護性
+## 待跨檔驗證
+重大問題必須指出檔案與可見證據；沒有證據就不要列為已證實。不要修改程式、不要輸出完整檔案。控制在 1800 字內。`;
+  const result = await askA(env.AI, env, [
+    { role:"system", content:"你是大型 repository 的批次 Code Review 工程師。只根據完整可見原始碼建立證據。" },
+    { role:"user", content:prompt },
+  ], 2600, 0.1, PRIMARY_TIMEOUT_MS);
+  return {
+    text:String(result.text || "").trim(),
+    source:result.source,
+    filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
+  };
+}
+
 export async function runEngineeringCouncil({ env, question, rawFiles, rawImages, webSearch, analysisOnly = false, reportMode = false }) {
   const files = normalizeFiles(rawFiles);
   const images = Array.isArray(rawImages) ? rawImages.slice(0, MAX_IMAGES) : [];
