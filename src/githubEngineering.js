@@ -5,7 +5,7 @@
  * 最後只建立新 branch + Pull Request，不直接修改 base branch。
  */
 
-import { runEngineeringCouncil, runAuditBatch, runFixDirectionReview, runPostFixReview } from "./debate.js";
+import { runEngineeringCouncil, runAuditBatch, runFixDirectionReview, runPostFixReview, synthesizeAuditEvidence } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
@@ -393,23 +393,41 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
   });
 
   if (finalResult?.reportGenerationFailed) {
-    const rescueQuestion =
-      "【Audit Rescue Synthesis】Repository：" + fullName + " / Base：" + base +
-      "。原始任務：" + question + "。Coverage " + coverage.pct + "% (" +
-      coverage.count + "/" + coverage.total + ")。以下只包含完整檔案批次產生的證據摘要。" +
-      "請重新產生完整 Audit Report；若摘要提到 [TRUNCATED]，一律視為審查上下文限制而非 repository 檔案損壞，不得升格 Must Fix。";
-    const rescue=await runEngineeringCouncil({
+    // v4.3：Rescue 不再遞迴呼叫完整 A/B Audit pipeline。
+    // 直接把已完成的完整檔案 batch evidence 交給專用 synthesis，避免第二次又走同一個失敗路徑。
+    const rescue=await synthesizeAuditEvidence({
       env,
-      question:rescueQuestion,
+      question,
       rawFiles:[manifest,...findings],
-      rawImages:[],
-      webSearch:false,
-      analysisOnly:true,
-      reportMode:true,
+      coverage,
     });
-    if (!rescue?.reportGenerationFailed) {
-      if (rescue.artifact) rescue.artifact.rescuedFromReportFailure=true;
-      Object.assign(finalResult,rescue);
+    if (rescue.complete) {
+      finalResult.reportGenerationFailed=false;
+      finalResult.final=rescue.report;
+      finalResult.artifact={
+        ...(finalResult.artifact||{}),
+        summary:"Evidence Rescue Synthesis 已完成。",
+        report:rescue.report,
+        pending:[],
+        instructions:["已由完整批次證據重新合成 Audit Report。"],
+        rescuedFromReportFailure:true,
+        rescueSource:rescue.source,
+      };
+    } else {
+      finalResult.final=[
+        "# AI Council Audit 未完成",
+        "## 狀態",
+        "Primary Report 與 Evidence Rescue 都未達完整度門檻；本次不產生確定性 Audit 結論。",
+        "## 安全限制",
+        "不得依 A/B 原文、[TRUNCATED] reviewer context 或不完整報告直接修改 repository。",
+        "## Coverage",
+        "Audit Coverage "+coverage.pct+"% ("+coverage.count+"/"+coverage.total+" readable files)。"
+      ].join("\n\n");
+      if(finalResult.artifact){
+        finalResult.artifact.report=finalResult.final;
+        finalResult.artifact.pending=["Primary Report 與 Evidence Rescue 均未完成。"];
+        finalResult.artifact.rescueFailed=true;
+      }
     }
   }
 
