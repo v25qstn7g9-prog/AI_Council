@@ -467,7 +467,10 @@ export async function runEngineeringCouncil({ env, question, rawFiles, rawImages
     images.map(image => analyzeImage(env.AI, image))
   );
 
-  const projectContext = buildProjectContext(files, imageReports).text;
+  const projectContext = buildProjectContext(files, imageReports, analysisOnly
+    ? { maxTotalChars: 80000, maxFileChars: 16000 }
+    : undefined
+  ).text;
   const searchNote = search.used && search.text
     ? `\n\n【Web Search 資料】\n${search.text}`
     : "";
