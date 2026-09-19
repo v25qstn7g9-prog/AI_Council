@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.3.0";
+const VERSION = "4.4.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -523,8 +523,11 @@ ${context}
   const r=await askA(env.AI,env,[{role:"system",content:"你是證據導向的 Audit Report 編輯器。只整合既有完整批次證據，不新增事實。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
   const report=String(r.text||"").trim();
   const sectionCount=(report.match(/^##\s+/gm)||[]).length;
-  const complete=report.length>=1200 && sectionCount>=10;
-  return {complete,report,source:r.source,debug:r.debug,sectionCount,length:report.length};
+  // 用報告結構判斷完整性；避免精簡但完整的報告只因未滿 1200 字被誤判失敗。
+  const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","最終結論"];
+  const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
+  const complete=report.length>=500 && sectionCount>=10 && headingHits>=9;
+  return {complete,report,source:r.source,debug:r.debug,sectionCount,headingHits,length:report.length};
 }
 
 export async function runAuditBatch({ env, question, rawFiles }) {
