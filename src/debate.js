@@ -13,15 +13,15 @@
  * }
  */
 
-const VERSION = "3.12.0";
+const VERSION = "3.13.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const MAX_Q = 4000;
 const MAX_FILES = 30;
-const MAX_FILE_CHARS = 30000;
-const MAX_TOTAL_FILE_CHARS = 180000;
+const MAX_FILE_CHARS = 60000;
+const MAX_TOTAL_FILE_CHARS = 240000;
 const MAX_IMAGES = 4;
 const MAX_RESCUE_FILES = 5;
 const MAX_REVIEW_CONTEXT_CHARS = 80000;
