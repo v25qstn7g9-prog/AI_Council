@@ -5,7 +5,7 @@
  * 最後只建立新 branch + Pull Request，不直接修改 base branch。
  */
 
-import { runEngineeringCouncil } from "./debate.js";
+import { runEngineeringCouncil, runAuditBatch } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
@@ -17,7 +17,7 @@ const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
 const MAX_REPO_AUDIT_FILES = 80;
 const MAX_REPO_AUDIT_CHARS = 2000000;
-const AUDIT_BATCH_TARGET_CHARS = 180000;
+const AUDIT_BATCH_TARGET_CHARS = 280000;
 const MAX_AUDIT_BATCHES = 12;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
@@ -346,20 +346,16 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
 
   for (const batch of plan.batches) {
     const paths=batch.files.map(f=>f.path);
-    const batchResult=await runEngineeringCouncil({
+    const batchResult=await runAuditBatch({
       env,
       question:
-        `【Full Repo Batch Audit ${batch.id}/${plan.batches.length}】\nRepository：${fullName}\nBase：${base}\n群組：${batch.group}\n原始任務：${question}\n\n只審查本批完整檔案。輸出證據導向的局部審查：架構/功能、安全、錯誤處理、效能、已證實問題、推測問題、待跨檔驗證。每個問題必須寫檔案與可見證據。不要產生修改檔案，不要聲稱看過本批以外內容。`,
+        `【Full Repo Batch Audit ${batch.id}/${plan.batches.length}】 Repository：${fullName} / Base：${base} / 群組：${batch.group}。原始任務：${question}。只審查本批完整檔案；建立證據，不修改程式。`,
       rawFiles:batch.files,
-      rawImages:[],
-      webSearch:false,
-      analysisOnly:true,
-      reportMode:false,
     });
     reviewedPaths.push(...paths);
     findings.push({
       path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
-      content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n## AI A\n${batchResult.a||""}\n\n## AI B\n${batchResult.b||""}\n\n## Batch synthesis\n${batchResult.final||""}`,
+      content:`# Batch ${batch.id}: ${batch.group}\n\nFiles: ${paths.join(", ")}\n\n${batchResult.text||""}`,
       size:0,
       truncated:false
     });
