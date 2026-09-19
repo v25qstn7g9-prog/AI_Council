@@ -1,6 +1,12 @@
-# AI 圓桌 v3.14.1｜Evidence-Gated Audit
+# AI 圓桌 v4.0.0｜Batch Full Repo Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.0.0：Batch Full Repo Audit
+
+大型 GitHub repository 的審查不再把整個專案一次塞進單一 context。GitHub 工程模式會先建立完整 readable-file 清單，依 runtime/routing、AI、domain data、frontend、tests、build/docs 等群組自動分批；每個檔案只會以完整內容進入一個 batch，不切半。每批由 AI A / AI B 產生局部證據，再以批次結果與 Coverage Manifest 進行最終整合。
+
+最終 artifact 會附帶 `coverage`、`batchCount`、`reviewedFiles`、`skippedFiles`。Audit Coverage 以「完整審查的 readable files / repository 可讀檔案」計算；任何因 file limit、repo budget、單檔過大、讀取失敗或 batch 上限而未審查的檔案都會明列，不能再被默認為已檢查。v3.14.1 的 Evidence Gate 繼續保留。
 
 ## 可以做什麼
 
