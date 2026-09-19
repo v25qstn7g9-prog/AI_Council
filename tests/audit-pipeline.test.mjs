@@ -101,4 +101,22 @@ const reportSectionsBase=[
   assert.equal(rejected.complete,false,"結論本身淡化 critical finding 時仍應被擋下");
 }
 
+// v4.9.2 regression：不得假設「最終結論」標題固定編號為 12。實際 prompt 要求
+// 的 13 個章節中「最終結論」是第 13 項，AI C 也可能完全不編號；標題比對
+// 不到任何一種寫法時，split() 會退化成整份報告掃描（等於沒修）。
+{
+  const reportNumberedThirteen=[...reportSectionsBase,"## 13. 最終結論\n存在 Critical 缺陷，前端無法正常運作，不符合部署標準。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportNumberedThirteen}));
+  const accepted=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(accepted.complete,true,"標題編號為 13（而非假設的 12）時，非結論章節的『無重大問題』仍不應阻擋通過");
+}
+{
+  const reportNumberedThirteenUnsafe=[...reportSectionsBase,"## 13. 最終結論\n整體程式碼品質良好，沒有重大問題。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportNumberedThirteenUnsafe}));
+  const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(rejected.complete,false,"標題編號為 13 時，結論本身淡化 critical finding 仍應被擋下");
+}
+
 console.log("audit-pipeline tests: ok");
