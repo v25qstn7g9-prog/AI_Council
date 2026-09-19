@@ -1,6 +1,10 @@
-# AI 圓桌 v4.8.0｜Tested ABC Three-Layer Audit
+# AI 圓桌 v4.8.1｜Efficient ABC Three-Layer Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.8.1：Quota-Efficient ABC Audit
+
+依實際 v4.8.0 診斷，六個 batch 的 12 次 A/B 呼叫會在 C 裁決前耗盡上游容量。v4.8.1 不再因群組邊界強制切批，改以 100,000 字元安全預算打包，測試專案會由 6 批降為約 3 批；A/B 輸出與 C 最終輸出預算同步縮減。修正完整度判斷後，Mistral Small 3.1 恢復為低成本、128K context 的 C 主模型，Llama 3.3 70B Fast 改為第二備援。
 
 ## v4.8.0：Tested ABC Audit
 
