@@ -114,6 +114,9 @@ wrangler deploy
 
 ## 版本
 
+- v3.11.0：新增 GitHub 工程模式：可直接讀取授權 repository，由 AI A / AI B 討論與產生最小修改，建立獨立 branch 與 Draft Pull Request。
+
+
 - v3.10.1：
   - Self-Review 強化：GitHub PR 僅允許固定白名單檔案、手動觸發只接受 Header Token，並加入獨立頻率限制。
   - 修正版 ZIP Rescue 設定最多逐檔救援 5 個檔案，避免大型專案在輸出異常時放大 AI 額度消耗。
@@ -201,11 +204,11 @@ commit
 
 AI 只會提交與原始 snapshot 不同、且通過路徑驗證的完整檔案內容。GitHub Token 永遠只存在 Worker Secret，不會送進 AI prompt。
 
-GitHub REST API 的 branch、Git tree/blob 與 Pull Request 流程均採官方 API；Pull Request 預設建立為 Draft，不會自動 Merge。citeturn0search2turn0search10turn0search0
+GitHub REST API 的 branch、Git tree/blob 與 Pull Request 流程均採官方 API；Pull Request 預設建立為 Draft，不會自動 Merge。
 
 ### Rate Limit
 
-GitHub REST API 有主要與 secondary rate limits，因此工程模式讀取檔案採受控數量與串行請求，避免短時間大量 API 呼叫。citeturn3search0turn3search4
+GitHub REST API 有主要與 secondary rate limits，因此工程模式讀取檔案採受控數量與串行請求，避免短時間大量 API 呼叫。
 
 ## 自我健檢（AI 圓桌審查自己的原始碼）
 
