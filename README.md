@@ -1,6 +1,10 @@
-# AI 圓桌 v4.6.0｜Dual AI Audit
+# AI 圓桌 v4.7.0｜ABC Three-Layer Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.7.0：ABC Three-Layer Audit
+
+審核流程改為真正三個獨立模型：AI A（GPT-OSS 120B）逐批主審、AI B（Qwen3 30B）同批反方複審、AI C（Mistral Small 3.1 24B）只根據 A/B 證據與 Coverage Manifest 做最終裁決。前端分別顯示 A、B、C 三張卡片；下載報告由 C 產生，不再由 AI A 兼任「最終整合」。
 
 ## v4.6.0：Dual AI Audit
 
@@ -52,7 +56,7 @@ Audit 模式新增硬性截斷證據規則：Reviewer context 出現 [TRUNCATED]
 - 可選 Web Search（Tavily）
 - AI A：主工程師
 - AI B：Code Reviewer
-- AI A：最終整合
+- AI C：獨立證據裁決與最終整合
 - 若最終模型能安全產生完整檔案內容，前端可直接下載「修正版 ZIP」
 
 ## 圖片
@@ -88,12 +92,15 @@ wrangler secret put ANTHROPIC_API_KEY
 
 ```jsonc
 "COUNCIL_A_PROVIDER": "openai",
-"COUNCIL_B_PROVIDER": "anthropic"
+"COUNCIL_B_PROVIDER": "anthropic",
+"COUNCIL_C_PROVIDER": "cloudflare"
 ```
 
 可選模型：`OPENAI_MODEL`、`ANTHROPIC_MODEL`。沒有設定時使用程式內預設值。ChatGPT / Claude 的 App 訂閱與 API 計費是分開的；本版不會因為升級自動產生 API 費用。
 
 AI B Reviewer 仍使用 Cloudflare `@cf/qwen/qwen3-30b-a3b-fp8`。由於該模型 context window 為 32,768 tokens，v3.5 會只給 Reviewer 一個受控的專用上下文預算，避免大型專案把 Reviewer 的 context 撐爆。
+
+AI C 證據裁決使用 Cloudflare `@cf/mistralai/mistral-small-3.1-24b-instruct`，獨立整合 AI A 與 AI B 的批次審核證據並產生最終報告；它不是 AI A 的別名或重跑。
 
 ## Web Search
 
