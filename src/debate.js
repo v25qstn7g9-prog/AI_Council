@@ -522,12 +522,13 @@ ${context}
 6. 不得修改程式碼。`;
   const r=await askA(env.AI,env,[{role:"system",content:"你是證據導向的 Audit Report 編輯器。只整合既有完整批次證據，不新增事實。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
   const report=String(r.text||"").trim();
-  const sectionCount=(report.match(/^##\s+/gm)||[]).length;
-  // 用報告結構判斷完整性；避免精簡但完整的報告只因未滿 1200 字被誤判失敗。
+  const sectionCount=(report.match(/^##\\s+/gm)||[]).length;
+  // v4.4：完整度以報告結構為主，不再用 1200 字的任意長度門檻誤殺精簡但完整的報告。
   const requiredHeadings=["執行摘要","檢查範圍","架構","功能邏輯","已證實問題","待驗證","安全性","效能","測試部署風險","修正建議","最終結論"];
   const headingHits=requiredHeadings.filter(h=>report.includes(h)).length;
   const complete=report.length>=500 && sectionCount>=10 && headingHits>=9;
   return {complete,report,source:r.source,debug:r.debug,sectionCount,headingHits,length:report.length};
+
 }
 
 export async function runAuditBatch({ env, question, rawFiles }) {
