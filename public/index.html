@@ -459,6 +459,7 @@ async function run(){
         status.textContent="完成 · 沒有需要修改";
       }
     }catch(e){
+      clearTimeout(timeoutId);
       const msg = e?.name === "AbortError"
         ? "工程會議超過 90 秒仍未完成；GitHub 連線本身正常，這次分析可能太大，請縮小任務範圍後再試。"
         : String(e?.message||e);
@@ -523,10 +524,6 @@ const composerForm=$("#composerForm");
 composerForm.addEventListener("submit",e=>{
   e.preventDefault();
   run();
-});
-send.addEventListener("click",e=>{
-  // submit event handles the actual send; prevent iOS duplicate gesture paths.
-  e.preventDefault();
 });
 q.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();run()}});
 
