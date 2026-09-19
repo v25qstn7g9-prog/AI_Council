@@ -235,8 +235,8 @@ function extractFunctionNames(source) {
   const names = new Set();
   const s = String(source || "");
   const patterns = [
-    /(?:^|\\n)\\s*(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)\\s*\\(/g,
-    /(?:^|\\n)\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?\\([^\\n]*\\)\\s*=>/g,
+    /(?:^|\n)\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g,
+    /(?:^|\n)\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^\n]*\)\s*=>/g,
   ];
   for (const re of patterns) {
     let m;
@@ -265,7 +265,15 @@ function validateProposedFiles(proposed, originalMap, task = "") {
     const original = originalMap.get(path);
     if (raw.content === original) continue;
 
-    // 防止 LLM 產生「看似修一小段，實際把整個檔案其他功能刪掉」的完整檔案。
+    // 絕不接受模型自己產生的截斷標記或明顯的整檔重寫。
+    if (/\[TRUNCATED\]|\.\.\.\s*(?:END|檔案結尾|省略)/i.test(raw.content)) continue;
+
+    const explicitDelete = taskExplicitlyRequestsDeletion(task, path);
+
+    // 非刪除/重構任務時，修改後檔案不得突然縮到原檔的一半以下。
+    // 這是第二道保險：即使函式名稱沒有被正則抓到，也不能把大量無關程式碼砍掉。
+    if (!explicitDelete && original.length >= 1200 && raw.content.length < original.length * 0.5) continue;
+
     // 若原檔的具名函式在新檔消失，除非任務明確要求該函式被刪除/重構，否則拒絕建立 PR。
     const originalFns = extractFunctionNames(original);
     const proposedFns = extractFunctionNames(raw.content);
@@ -412,7 +420,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const result = await runEngineeringCouncil({
     env,
     question:
-      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。`,
+      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 分析與提出修改，再由 AI B 重新檢查，最後整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
     rawFiles: snapshot.files,
     rawImages: [],
     webSearch: false,
