@@ -13,9 +13,10 @@
  * }
  */
 
-const VERSION = "4.6.0";
+const VERSION = "4.7.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
+const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 const MAX_Q = 4000;
@@ -178,7 +179,7 @@ async function askAnthropic(apiKey, model, messages, maxTokens = 1200, temperatu
 
 async function askProvider(ai, env, provider, messages, maxTokens = 1200, temperature = 0.35, role = "AI", timeoutMs = PRIMARY_TIMEOUT_MS) {
   if (provider === "cloudflare") {
-    const model = role === "B" ? MODEL_B : MODEL_A_FALLBACK;
+    const model = role === "B" ? MODEL_B : role === "C" ? MODEL_C : MODEL_A_FALLBACK;
     return { text: await ask(ai, model, messages, maxTokens, temperature, timeoutMs), source: model };
   }
   if (provider === "openai") {
@@ -236,6 +237,26 @@ async function askB(ai, env, messages, maxTokens = 1200, temperature = 0.35, tim
     }
     const text = await ask(ai, MODEL_B, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
     return { text, source: `Qwen3 30B（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗，已切換 Cloudflare 備援` };
+  }
+}
+
+async function askC(ai, env, messages, maxTokens = 1200, temperature = 0.2, timeoutMs = PRIMARY_TIMEOUT_MS) {
+  const provider = normalizeProvider(env.COUNCIL_C_PROVIDER, "cloudflare");
+  try {
+    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "C", timeoutMs);
+  } catch (e) {
+    if (provider === "cloudflare") {
+      const key = await getSecret(env, "GEMINI_API_KEY");
+      if (!key) throw e;
+      try {
+        const text = await askGemini(env, key, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+        return { text, source: "Gemini 3.5（AI C Cloudflare 額度自動備援）", debug: "AI C Cloudflare 失敗，已切換 Gemini" };
+      } catch (ge) {
+        throw new Error(`AI C Cloudflare 與 Gemini 備援皆失敗：${sanitizeInternalError(ge)}`);
+      }
+    }
+    const text = await ask(ai, MODEL_C, messages, maxTokens, temperature, FALLBACK_TIMEOUT_MS);
+    return { text, source: `Mistral Small 3.1（${provider} 失敗，改用 Cloudflare 備援）`, debug: `${provider} 失敗，AI C 已切換 Cloudflare 備援` };
   }
 }
 
@@ -521,7 +542,7 @@ ${context}
 4. 跨批次衝突或證據不足一律放待驗證。
 5. 必須明確寫 Audit Coverage ${coverageText}。
 6. 不得修改程式碼。`;
-  const r=await askA(env.AI,env,[{role:"system",content:"你是證據導向的 Audit Report 編輯器。只整合既有完整批次證據，不新增事實。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
+  const r=await askC(env.AI,env,[{role:"system",content:"你是獨立的 AI C 證據裁決者。只整合 AI A 與 AI B 的批次證據，不新增事實；有衝突時降級為待驗證。"}, {role:"user",content:prompt}],6000,0.05,FALLBACK_TIMEOUT_MS);
   const report=String(r.text||"").trim();
   const sectionCount=(report.match(/^##\\s+/gm)||[]).length;
   // v4.4：完整度以報告結構為主，不再用 1200 字的任意長度門檻誤殺精簡但完整的報告。
@@ -752,8 +773,8 @@ ${auditEvidenceManifest}
 13. AI A/B 的分析是待核對意見，不是獨立證據；若與完整原始碼證據衝突，以完整原始碼為準。
 `;
 
-    const reportResult = await askA(env.AI, env, [
-      { role:"system", content:"你是資深軟體工程 Audit Lead。只輸出完整 Markdown 工程審查報告，不輸出 JSON，不修改程式。用繁體中文，證據導向。" },
+    const reportResult = await askC(env.AI, env, [
+      { role:"system", content:"你是獨立的 AI C 證據裁決者。根據 AI A 主審與 AI B 反方複審，只輸出完整 Markdown 工程審查報告，不輸出 JSON，不修改程式。用繁體中文，證據導向。" },
       { role:"user", content:reportPrompt },
     ], 6500, 0.1, FALLBACK_TIMEOUT_MS);
 
@@ -799,7 +820,7 @@ ${auditEvidenceManifest}
 
 規則：A/B 只是待核對意見，不是獨立證據。必須依 Audit 證據清單判斷檔案是否完整；任何 Syntax Error、檔案中斷、缺尾端、無法編譯/部署等主張，若沒有完整檔案中的直接證據，一律寫入待驗證，不得列為已證實。禁止虛構「人工查閱/人工確認/實際部署」。完整報告至少 1200 字元。`;
 
-      const retryResult = await askA(env.AI, env, [
+      const retryResult = await askC(env.AI, env, [
         { role:"system", content:"只輸出完整 Markdown 工程 Audit Report。禁止只回標題或摘要。" },
         { role:"user", content:retryPrompt },
       ], 5000, 0.1, FALLBACK_TIMEOUT_MS);
@@ -845,9 +866,9 @@ ${auditEvidenceManifest}
 
     return {
       version:VERSION,
-      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
-      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
-      a, b,
+      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare"), c:normalizeProvider(env.COUNCIL_C_PROVIDER, "cloudflare") },
+      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer`, c:`${reportResult.source} · 證據裁決` },
+      a, b, c:report,
       final:report || summary,
       artifact,
       debug:[aResult.debug, bResult.debug, reportResult.debug].filter(Boolean).join("\n") || undefined,
@@ -907,8 +928,8 @@ ${b}
   "sources": []
 }`;
 
-    const analysisResult = await askA(env.AI, env, [
-      { role:"system", content:"你是資深軟體 Code Review Lead。只做證據導向的程式碼分析，不輸出檔案，不做修改。用繁體中文，精準務實。" },
+    const analysisResult = await askC(env.AI, env, [
+      { role:"system", content:"你是獨立的 AI C 證據裁決者。整合 AI A 主審與 AI B 反方複審，只做證據導向的程式碼分析，不輸出檔案、不做修改。用繁體中文。" },
       { role:"user", content:analysisPrompt },
     ], 3500, 0.15);
 
@@ -931,9 +952,9 @@ ${b}
 
     return {
       version:VERSION,
-      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
-      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
-      a, b,
+      providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare"), c:normalizeProvider(env.COUNCIL_C_PROVIDER, "cloudflare") },
+      labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer`, c:`${analysisResult.source} · 證據裁決` },
+      a, b, c:raw,
       final:[meta.summary, meta.rootCause].filter(Boolean).join("\n\n") || raw,
       artifact,
       debug:[aResult.debug, bResult.debug, analysisResult.debug].filter(Boolean).join("\n") || undefined,
@@ -1049,8 +1070,8 @@ ${b}
 - 最終摘要要優先呈現已證實因素；推測與待驗證放後面。
 - 檔案內容一定要放在 JSON 區塊「之後」，兩段不要交錯。`;
 
-  const finalResult = await askA(env.AI, env, [
-    { role:"system", content:"你是軟體專案最終整合工程師。輸出格式固定兩段：先是 fenced JSON 說明（不含檔案內容），再用 =====FILE=====／=====ENDFILE===== 純文字格式輸出每個檔案。絕對不要把檔案內容包進 JSON 欄位裡，就算這是你平常的習慣寫法也不可以。" },
+  const finalResult = await askC(env.AI, env, [
+    { role:"system", content:"你是獨立的 AI C 證據裁決與最終整合工程師。先裁決 AI A/B 的證據與分歧，再輸出固定兩段：fenced JSON 說明（不含檔案內容），以及 =====FILE=====／=====ENDFILE===== 完整檔案。" },
     { role:"user", content:finalPrompt },
   ], FINAL_MAX_TOKENS, 0.15);
   const finalRaw = finalResult.text;
@@ -1220,9 +1241,9 @@ ${target.content}
 
   return {
     version:VERSION,
-    providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare") },
-    labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer` },
-    a, b,
+    providers:{ a:normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare"), b:normalizeProvider(env.COUNCIL_B_PROVIDER, "cloudflare"), c:normalizeProvider(env.COUNCIL_C_PROVIDER, "cloudflare") },
+    labels:{ a:`${aResult.source} · 主工程師`, b:`${bResult.source} · Reviewer`, c:`${finalResult.source} · 證據裁決` },
+    a, b, c:finalText,
     final:finalText,
     artifact,
     debug:[aResult.debug, bResult.debug, finalResult.debug].filter(Boolean).join("\n") || undefined,
