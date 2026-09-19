@@ -18,7 +18,8 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;font
 .files{margin-top:10px;display:flex;flex-wrap:wrap;gap:7px}.chip{font-size:11px;padding:6px 8px;border-radius:10px;background:#10141b;border:1px solid var(--line);display:flex;gap:6px;align-items:center;max-width:100%}.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.chip button{padding:0;background:none;color:var(--bad);border:0}
 .small{font-size:11px;color:var(--sub);line-height:1.5}.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .toggleWrap{display:flex;gap:7px;align-items:center;font-size:12px;color:#d8deea}.toggle{position:relative;width:42px;height:24px}.toggle input{display:none}.slider{position:absolute;inset:0;border-radius:999px;background:#353b48}.slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.18s}.toggle input:checked+.slider{background:#2b8a57}.toggle input:checked+.slider:before{transform:translateX(18px)}
-.badge{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--sub)}.badge.ok{color:var(--ok);border-color:#2d6a46}.badge.warn{color:var(--warn);border-color:#725b2d}
+.badge{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:var(--sub)}
+select,input[type="text"]{background:#0f131a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit;min-width:0}.githubGrid{display:grid;grid-template-columns:1fr 160px;gap:8px}@media(max-width:520px){.githubGrid{grid-template-columns:1fr}}.badge.ok{color:var(--ok);border-color:#2d6a46}.badge.warn{color:var(--warn);border-color:#725b2d}
 footer{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,#0b0d12 14%);padding:22px 12px calc(max(12px,env(safe-area-inset-bottom)) + env(keyboard-inset-height, 0px))}
 .composer{max-width:860px;margin:auto;background:#121720;border:1px solid var(--line);border-radius:16px;padding:10px}
 textarea{width:100%;height:78px;resize:none;background:transparent;border:0;outline:0;color:var(--text);font:inherit;padding:7px}
@@ -91,6 +92,23 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 <div class="small" style="margin-top:7px">只是想讓兩隻 AI 一起聊聊、不牽涉程式碼時打開；回覆更快更短，不會產生修正檔案。</div>
 </div>
 
+<div class="panel">
+<div class="row">
+  <label class="toggleWrap">
+    <span>🐙 GitHub 工程模式</span>
+    <span class="toggle"><input id="githubMode" type="checkbox"><span class="slider"></span></span>
+  </label>
+  <span id="githubState" class="badge">OFF · 直接讀 GitHub 實際原始碼</span>
+</div>
+<div id="githubControls" style="display:none;margin-top:10px">
+  <div class="githubGrid">
+    <select id="githubRepo"><option value="">讀取可用 repository…</option></select>
+    <input id="githubBase" type="text" maxlength="120" placeholder="base branch" value="main">
+  </div>
+  <div class="small" style="margin-top:7px">雙 AI 會直接讀目前 GitHub branch，討論後建立新 branch + Draft PR；不會直接改 main。</div>
+</div>
+</div>
+
 <div id="chat" class="chatBox"></div>
 </div>
 
@@ -109,7 +127,9 @@ const $=s=>document.querySelector(s);
 const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileStats"),
       q=$("#q"),send=$("#send"),status=$("#status"),chat=$("#chat"),
       webSearch=$("#webSearch"),searchState=$("#searchState"),
-      chatModeEl=$("#chatMode"),chatModeState=$("#chatModeState");
+      chatModeEl=$("#chatMode"),chatModeState=$("#chatModeState"),
+      githubMode=$("#githubMode"),githubState=$("#githubState"),githubControls=$("#githubControls"),
+      githubRepo=$("#githubRepo"),githubBase=$("#githubBase");
 
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
@@ -204,6 +224,45 @@ chatModeEl.onchange=()=>{
   chatModeState.className="badge "+(chatModeEl.checked?"ok":"");
 };
 
+let githubReposLoaded=false;
+async function loadGitHubRepos(){
+  if(githubReposLoaded)return;
+  githubReposLoaded=true;
+  try{
+    const r=await fetch("/github/repos");
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw Error(d.error||"GitHub repository 清單取得失敗");
+    githubRepo.innerHTML="";
+    for(const x of d.repos||[]){
+      const o=document.createElement("option");
+      o.value=x.fullName;
+      o.textContent=x.fullName+(x.private?" 🔒":"");
+      o.dataset.branch=x.defaultBranch||"main";
+      githubRepo.append(o);
+    }
+    if(!githubRepo.options.length)throw Error("沒有可用 repository");
+    githubBase.value=githubRepo.options[0].dataset.branch||"main";
+  }catch(e){
+    githubReposLoaded=false;
+    githubRepo.innerHTML='<option value="">GitHub 連線失敗</option>';
+    addCard("err","GitHub","無法取得 repository 清單："+String(e.message||e));
+  }
+}
+githubRepo.onchange=()=>{
+  const o=githubRepo.options[githubRepo.selectedIndex];
+  if(o?.dataset?.branch)githubBase.value=o.dataset.branch;
+};
+githubMode.onchange=async()=>{
+  const on=githubMode.checked;
+  githubControls.style.display=on?"block":"none";
+  githubState.textContent=on?"ON · 直接讀 GitHub + 雙 AI + Draft PR":"OFF · 直接讀 GitHub 實際原始碼";
+  githubState.className="badge "+(on?"ok":"");
+  if(on){
+    chatModeEl.checked=false;
+    chatModeEl.onchange();
+    await loadGitHubRepos();
+  }
+};
 async function imageDataUrl(file){
   if(file.size>2.5*1024*1024)throw Error(`${file.name} 超過 2.5MB，請先縮圖`);
   return new Promise((resolve,reject)=>{
@@ -362,6 +421,37 @@ async function run(){
   if(!question||send.disabled)return;
   send.disabled=true;lastArtifact=null;
   q.value="";
+
+  if(githubMode.checked){
+    const repoName=githubRepo.value;
+    const base=githubBase.value.trim()||"main";
+    if(!repoName){
+      addCard("err","GitHub 工程模式","請先選擇 repository。");
+      send.disabled=false;
+      return;
+    }
+    addCard("card","🐙 GitHub",`Repository：${repoName}\nBase：${base}`);
+    status.textContent="GitHub 讀取原始碼…";
+    try{
+      const r=await fetch("/github/engineering",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repoFullName:repoName,base,task:question})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
+      addCard("a","AI A · 主工程師",d.a||"");
+      addCard("b","AI B · Reviewer",d.b||"");
+      if(d.final)addCard("judge","最終整合",d.final);
+      if(d.action==="pull_request"){
+        addCard("judge","🐙 GitHub PR",`已建立 Draft PR #${d.pr?.number||""}\n${d.pr?.url||""}\n\nBranch：${d.branch}\n修改：${(d.changedFiles||[]).join("、")}`);
+        status.textContent="完成 · Draft PR 已建立";
+      }else{
+        addCard("card","🐙 GitHub","AI 判定這次沒有需要提交的修改。");
+        status.textContent="完成 · 沒有需要修改";
+      }
+    }catch(e){
+      addCard("err","GitHub 工程模式失敗",String(e.message||e));
+      status.textContent="失敗";
+    }finally{send.disabled=false}
+    return;
+  }
   forceDismissKeyboard();
   addCard("me","你",question);
 
