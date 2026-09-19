@@ -404,7 +404,7 @@ export async function listGitHubRepos(env) {
     }));
 }
 
-export async function runGitHubEngineering(env, { repoFullName, base, task, dryRun = false }) {
+export async function runGitHubEngineering(env, { repoFullName, base, task, dryRun = false, reportMode = false }) {
   const { fullName } = repoConfig(env, repoFullName);
   const safeBase = String(base || "main").trim();
   if (!/^[A-Za-z0-9._/-]{1,120}$/.test(safeBase) || safeBase.includes("..") || safeBase.startsWith("/")) {
@@ -425,6 +425,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     rawImages: [],
     webSearch: false,
     analysisOnly: dryRun,
+    reportMode: reportMode === true,
   });
 
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap, question);
@@ -481,6 +482,7 @@ export async function handleGitHubEngineering(request, env) {
       base: body?.base,
       task: body?.task,
       dryRun: body?.dryRun === true,
+      reportMode: body?.reportMode === true,
     });
     return json(result);
   } catch (e) {
