@@ -1,6 +1,10 @@
-# AI 圓桌 v4.1.0｜Verified Fix Pipeline
+# AI 圓桌 v4.2.0｜Evidence Rescue Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.2.0：Evidence Rescue Audit
+
+Audit 模式新增硬性截斷證據規則：Reviewer context 出現 [TRUNCATED] 只代表審查副本受 context budget 限制，不能推論 GitHub 原始檔損壞、Syntax Error、無法編譯或 Must Fix。最終報告生成失敗時，不再把互相矛盾的 A/B 原文包裝成成功 Audit Report；Full Repo 流程會以完整批次證據進行一次 Rescue Synthesis，仍失敗則明確標記 Audit 未完成，不允許據此修改程式。
 
 ## v4.1.0：Verified Fix Pipeline
 
