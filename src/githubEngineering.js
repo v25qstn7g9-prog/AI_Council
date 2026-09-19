@@ -386,6 +386,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     rawFiles: snapshot.files,
     rawImages: [],
     webSearch: false,
+    analysisOnly: dryRun,
   });
 
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap);
