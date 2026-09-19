@@ -17,9 +17,9 @@ const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
 const MAX_REPO_AUDIT_FILES = 80;
 const MAX_REPO_AUDIT_CHARS = 2000000;
-const AUDIT_BATCH_TARGET_CHARS = 280000;
+const AUDIT_BATCH_TARGET_CHARS = 80000;
 const MAX_AUDIT_BATCHES = 12;
-const AUDIT_BATCH_CONCURRENCY = 2;
+const AUDIT_BATCH_CONCURRENCY = 1;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
   "md","txt","xml","yaml","yml","toml","csv","py","java","go","rs",
@@ -492,12 +492,18 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
           truncated:false
         }
       };
-    } catch {
+    } catch (error) {
+      const message=String(error?.message||"");
+      const reason=/逾時|timeout/i.test(message)
+        ? "模型回應逾時"
+        : /429|額度|rate.?limit/i.test(message)
+          ? "模型額度或速率限制"
+          : "模型服務未回應";
       return {
         ok:false,paths:[],skipped:paths,
         finding:{
           path:`batch-${String(batch.id).padStart(2,"0")}-${batch.group}.md`,
-          content:`# Batch ${batch.id}: ${batch.group}\n\nStatus: 審查失敗或逾時。\n\nFiles not reviewed: ${paths.join(", ")}`,
+          content:`# Batch ${batch.id}: ${batch.group}\n\nStatus: 審查失敗（${reason}）。\n\nFiles not reviewed: ${paths.join(", ")}`,
           size:0,
           truncated:false
         }
@@ -548,7 +554,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.5.2",
+    version:"4.5.3",
     a:"",
     b:"",
     final:primary.report||"",
@@ -567,7 +573,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisSections:primary.sectionCount,
       synthesisHeadingHits:primary.headingHits,
       synthesisLength:primary.length,
-      pipelineVersion:"full-repo-evidence-v4.5.2",
+      pipelineVersion:"full-repo-evidence-v4.5.3",
     }
   };
 
@@ -589,7 +595,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       rescuedFromReportFailure:true,
       deterministicRescue:true,
       rescueLength:rescueReport.length,
-      pipelineVersion:"full-repo-evidence-v4.5.2",
+      pipelineVersion:"full-repo-evidence-v4.5.3",
     };
   }
 
@@ -838,7 +844,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       b:audit.result.b,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.5.2",
+      version:audit.result.version||"4.5.3",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
