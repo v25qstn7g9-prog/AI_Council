@@ -17,7 +17,7 @@ const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
 const MAX_REPO_AUDIT_FILES = 80;
 const MAX_REPO_AUDIT_CHARS = 2000000;
-const AUDIT_BATCH_TARGET_CHARS = 80000;
+const AUDIT_BATCH_TARGET_CHARS = 100000;
 const MAX_AUDIT_BATCHES = 12;
 const AUDIT_BATCH_CONCURRENCY = 1;
 const ALLOWED_EXT = new Set([
@@ -311,15 +311,17 @@ async function fetchFullRepoAuditFiles(env, fullName, base) {
   };
 }
 
-function planAuditBatches(files) {
+export function planAuditBatches(files) {
   const batches=[];
   for (const file of files) {
     let batch=batches[batches.length-1];
-    const mustNew=!batch || batch.group!==file.group ||
-      (batch.chars>0 && batch.chars+file.content.length>AUDIT_BATCH_TARGET_CHARS);
+    const mustNew=!batch || (batch.chars>0 && batch.chars+file.content.length>AUDIT_BATCH_TARGET_CHARS);
     if (mustNew) {
-      batch={id:batches.length+1,group:file.group,chars:0,files:[]};
+      batch={id:batches.length+1,group:file.group,groups:[file.group],chars:0,files:[]};
       batches.push(batch);
+    } else if (!batch.groups.includes(file.group)) {
+      batch.groups.push(file.group);
+      batch.group=batch.groups.join("+");
     }
     batch.files.push(file);
     batch.chars+=file.content.length;
@@ -586,7 +588,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     };
   }
   const finalResult={
-    version:"4.8.0",
+    version:"4.8.1",
     a:aReport,
     b:bReport,
     c:primary.report||"",
@@ -610,7 +612,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       synthesisDebug:primary.debug||"",
       cCompleted:Boolean(primary.complete),
       cEmergencyReviewedFiles:cEmergencyReviewedPaths,
-      pipelineVersion:"full-repo-abc-evidence-v4.8",
+      pipelineVersion:"full-repo-abc-evidence-v4.8.1",
       aReviewedFiles:aReviewedPaths,
       bReviewedFiles:bReviewedPaths,
     }
@@ -623,7 +625,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
     const rescueBase=buildDeterministicAuditReport({
       fullName,base,question,findings,coverage
     });
-    const rescueReport=[rescueBase,"## 14. Pipeline 診斷",`Pipeline：full-repo-abc-evidence-v4.8`,`AI C 完成：否`,`AI C 嘗試次數：${primary.attempts||2}`,`AI C 最後來源：${primary.source||"unavailable"}`,`AI C 診斷：${primary.debug||"未提供"}`,`AI A Coverage：${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI B Coverage：${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI C 緊急批次 Coverage：${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`].join("\n\n");
+    const rescueReport=[rescueBase,"## 14. Pipeline 診斷",`Pipeline：full-repo-abc-evidence-v4.8.1`,`AI C 完成：否`,`AI C 嘗試次數：${primary.attempts||2}`,`AI C 最後來源：${primary.source||"unavailable"}`,`AI C 診斷：${primary.debug||"未提供"}`,`AI A Coverage：${coverage.total?Math.round((new Set(aReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI B Coverage：${coverage.total?Math.round((new Set(bReviewedPaths).size/coverage.total)*1000)/10:100}%`,`AI C 緊急批次 Coverage：${coverage.total?Math.round((new Set(cEmergencyReviewedPaths).size/coverage.total)*1000)/10:0}%`].join("\n\n");
     finalResult.c="AI C 未完成證據裁決；以下最終報告為本地確定性降級證據包，不能視為 C 層判決。";
     finalResult.final=rescueReport;
     finalResult.artifact={
@@ -636,7 +638,7 @@ async function runFullRepoBatchAudit(env, fullName, base, question) {
       deterministicRescue:true,
       rescueLength:rescueReport.length,
       cCompleted:false,
-      pipelineVersion:"full-repo-abc-evidence-v4.8",
+      pipelineVersion:"full-repo-abc-evidence-v4.8.1",
     };
   }
 
@@ -886,7 +888,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
       c:audit.result.c,
       final:audit.result.final,
       artifact:audit.result.artifact||null,
-      version:audit.result.version||"4.8.0",
+      version:audit.result.version||"4.8.1",
       reportGenerationFailed:Boolean(audit.result.reportGenerationFailed),
       reportRequested:true,
     };
