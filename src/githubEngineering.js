@@ -13,6 +13,7 @@ const MAX_FILES = 18;
 const MAX_FILE_CHARS = 24000;
 const MAX_TOTAL_FILE_CHARS = 120000;
 const MAX_BLOB_CONCURRENCY = 5;
+const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
@@ -136,13 +137,24 @@ async function githubRequest(env, path, options = {}) {
   const token = await readSecret(env, "GITHUB_TOKEN");
   if (!token) throw new Error("GITHUB_TOKEN 尚未設定");
 
-  const response = await fetch(`https://api.github.com${path}`, {
-    ...options,
-    headers: ghHeaders(token, {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`https://api.github.com${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: ghHeaders(token, {
       ...(options.body ? { "content-type": "application/json" } : {}),
       ...(options.headers || {}),
-    }),
-  });
+      }),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("GitHub API 連線逾時");
+    throw new Error("GitHub API 連線失敗");
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const status = response.status;
@@ -501,6 +513,16 @@ export async function handleGitHubRepos(request, env) {
     return json({ ok: true, repos });
   } catch (e) {
     console.error("GitHub repository 清單讀取失敗：", e?.message || e);
-    return json({ ok: false, error: "GitHub repository 清單暫時無法取得" }, 500);
+    const message = String(e?.message || "");
+    const error = message.includes("GITHUB_TOKEN")
+      ? "GitHub 尚未完成設定"
+      : message.includes("權限或 Token")
+        ? "GitHub Token 無效或權限不足"
+        : message.includes("連線逾時")
+          ? "GitHub API 連線逾時"
+          : message.includes("連線失敗")
+            ? "GitHub API 連線失敗"
+            : "GitHub repository 清單暫時無法取得";
+    return json({ ok: false, error }, 500);
   }
 }
