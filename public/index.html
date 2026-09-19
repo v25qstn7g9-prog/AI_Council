@@ -299,6 +299,7 @@ function renderArtifact(artifact){
   preparedZipBlob=null;
   preparedZipBusy=false;
   const lines=[];
+  let reportActions=null;
   if(typeof artifact.report==="string"&&artifact.report.trim()){
     lines.push(artifact.report.trim());
     const reportActions=document.createElement("div");
@@ -323,7 +324,7 @@ function renderArtifact(artifact){
     reportHint.className="small";
     reportHint.textContent="可直接把這份 Markdown 報告交給另一個 AI 做第二層獨立審查。";
     reportActions.append(reportHint);
-    c.append(reportActions);
+    reportActions=reportActions;
   }
   if(artifact.rootCause)lines.push("根因：\n"+artifact.rootCause);
   if(Array.isArray(artifact.verified)&&artifact.verified.length)lines.push("已證實：\n- "+artifact.verified.join("\n- "));
@@ -333,6 +334,7 @@ function renderArtifact(artifact){
   if(Array.isArray(artifact.review)&&artifact.review.length)lines.push("Reviewer 核對：\n- "+artifact.review.join("\n- "));
   if(Array.isArray(artifact.instructions)&&artifact.instructions.length)lines.push("接下來：\n- "+artifact.instructions.join("\n- "));
   const c=addCard("judge","最終整合",lines.join("\n\n")||artifact.summary||"已完成整合");
+  if(reportActions)c.append(reportActions);
 
   if(Array.isArray(artifact.files)&&artifact.files.length){
     const actions=document.createElement("div");actions.className="outputActions";
@@ -466,7 +468,7 @@ async function run(){
       const r=await fetch("/github/engineering",{
         method:"POST",
         headers:{"content-type":"application/json"},
-        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun}),
+        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun,reportMode:/完整報告|詳細報告|產生報告|生成報告|audit report|full report/i.test(question)}),
         signal:controller.signal
       });
       clearTimeout(timeoutId);
