@@ -1,6 +1,10 @@
-# AI 圓桌 v4.5.0｜Guaranteed Audit Delivery
+# AI 圓桌 v4.5.1｜Guaranteed Report Delivery
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.5.1：Guaranteed Report Delivery
+
+補齊「檢查＋修正＋建立 Draft PR」路徑：AI 最終整合若沒有填入 `artifact.report`，後端會依實際掃描檔案、修正結果、驗證 Gate 與 PR 資訊建立確定性工程報告。前端只有在本題確實要求報告時才顯示缺報告診斷，普通修正任務不再誤報紅色錯誤。
 
 ## v4.5.0：Guaranteed Audit Delivery
 
