@@ -45,16 +45,21 @@ async function checkSelfReviewRateLimit(env) {
   const max = Number(maxStr), windowSec = Number(windowStr);
   if (!max || !windowSec || !env.council_kv) return { ok: true };
 
-  const key = "self-review:global";
-  const current = Number((await env.council_kv.get(key)) || 0);
-  if (current >= max) {
-    return {
-      ok: false,
-      message: `自我健檢太頻繁了，${Math.round(windowSec / 3600)} 小時內最多 ${max} 次，先讓圓桌休息一下 😅`,
-    };
+  try {
+    const key = "self-review:global";
+    const current = Number((await env.council_kv.get(key)) || 0);
+    if (current >= max) {
+      return {
+        ok: false,
+        message: `自我健檢太頻繁了，${Math.round(windowSec / 3600)} 小時內最多 ${max} 次，先讓圓桌休息一下 😅`,
+      };
+    }
+    await env.council_kv.put(key, String(current + 1), { expirationTtl: windowSec });
+    return { ok: true };
+  } catch (e) {
+    console.warn("KV 存取失敗，略過速率限制檢查：", e?.message || e);
+    return { ok: true };
   }
-  await env.council_kv.put(key, String(current + 1), { expirationTtl: windowSec });
-  return { ok: true };
 }
 
 async function handleSelfReviewRequest(request, env) {
