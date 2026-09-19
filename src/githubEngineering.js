@@ -9,9 +9,10 @@ import { runEngineeringCouncil } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
-const MAX_FILES = 30;
-const MAX_FILE_CHARS = 30000;
-const MAX_TOTAL_FILE_CHARS = 180000;
+const MAX_FILES = 18;
+const MAX_FILE_CHARS = 24000;
+const MAX_TOTAL_FILE_CHARS = 120000;
+const MAX_BLOB_CONCURRENCY = 5;
 const MAX_TREE_ENTRIES = 5000;
 const ALLOWED_EXT = new Set([
   "js","mjs","cjs","ts","tsx","jsx","html","htm","css","json","jsonc",
@@ -192,24 +193,38 @@ async function fetchRepoFiles(env, fullName, base) {
   const files = [];
   let total = 0;
 
-  // 讀取 GitHub 原始碼採串行，避免短時間大量 API 請求觸發 secondary rate limit。
-  for (const entry of candidates) {
-    if (total >= MAX_TOTAL_FILE_CHARS) break;
-    const blob = await githubRequest(
-      env,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(entry.sha)}`
+  // 小批次並行讀 blob：避免 18 個檔案完全串行造成手機端長時間等待，
+  // 同時把 concurrency 壓低，降低 GitHub secondary rate-limit 風險。
+  for (let start = 0; start < candidates.length && total < MAX_TOTAL_FILE_CHARS; start += MAX_BLOB_CONCURRENCY) {
+    const batch = candidates.slice(start, start + MAX_BLOB_CONCURRENCY);
+    const blobs = await Promise.all(
+      batch.map(async (entry) => {
+        try {
+          const blob = await githubRequest(
+            env,
+            `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(entry.sha)}`
+          );
+          return { entry, blob };
+        } catch {
+          return { entry, blob: null };
+        }
+      })
     );
-    if (blob?.encoding !== "base64" || typeof blob.content !== "string") continue;
-    let content = base64ToUtf8(blob.content);
-    const remaining = MAX_TOTAL_FILE_CHARS - total;
-    content = content.slice(0, Math.min(MAX_FILE_CHARS, remaining));
-    if (!content) continue;
-    total += content.length;
-    files.push({
-      path: entry.path,
-      content,
-      size: Number(entry.size || content.length),
-    });
+
+    for (const { entry, blob } of blobs) {
+      if (total >= MAX_TOTAL_FILE_CHARS) break;
+      if (blob?.encoding !== "base64" || typeof blob.content !== "string") continue;
+      let content = base64ToUtf8(blob.content);
+      const remaining = MAX_TOTAL_FILE_CHARS - total;
+      content = content.slice(0, Math.min(MAX_FILE_CHARS, remaining));
+      if (!content) continue;
+      total += content.length;
+      files.push({
+        path: entry.path,
+        content,
+        size: Number(entry.size || content.length),
+      });
+    }
   }
 
   if (!files.length) throw new Error("找不到可供 AI 審查的文字原始碼");
@@ -351,7 +366,7 @@ export async function listGitHubRepos(env) {
     }));
 }
 
-export async function runGitHubEngineering(env, { repoFullName, base, task }) {
+export async function runGitHubEngineering(env, { repoFullName, base, task, dryRun = false }) {
   const { fullName } = repoConfig(env, repoFullName);
   const safeBase = String(base || "main").trim();
   if (!/^[A-Za-z0-9._/-]{1,120}$/.test(safeBase) || safeBase.includes("..") || safeBase.startsWith("/")) {
@@ -374,10 +389,10 @@ export async function runGitHubEngineering(env, { repoFullName, base, task }) {
   });
 
   const proposed = validateProposedFiles(result?.artifact?.files, originalMap);
-  if (!proposed.length) {
+  if (dryRun || !proposed.length) {
     return {
       ok: true,
-      action: "no_changes",
+      action: dryRun ? "analysis_only" : "no_changes",
       repository: fullName,
       base: safeBase,
       scannedFiles: snapshot.files.map(f => f.path),
@@ -426,6 +441,7 @@ export async function handleGitHubEngineering(request, env) {
       repoFullName: body?.repoFullName,
       base: body?.base,
       task: body?.task,
+      dryRun: body?.dryRun === true,
     });
     return json(result);
   } catch (e) {
