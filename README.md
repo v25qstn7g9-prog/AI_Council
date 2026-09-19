@@ -1,6 +1,10 @@
-# AI 圓桌 v4.7.0｜ABC Three-Layer Audit
+# AI 圓桌 v4.7.1｜Reliable ABC Three-Layer Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.7.1：Reliable AI C Audit
+
+AI C 證據裁決新增兩次獨立生成機會、75 秒單次時限與明確結構診斷；A/B 同批皆未回應時會以較小輸出預算依序重試。若 C 最終仍失敗，介面會明確標記「C 未完成」，下載的確定性證據包不再冒充 C 層判決。前端等待時限同步調整為 480 秒。
 
 ## v4.7.0：ABC Three-Layer Audit
 
