@@ -1,4 +1,4 @@
-# AI 圓桌 v3.13.0｜Full Repo Audit
+# AI 圓桌 v3.14.0｜Complete Source Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -113,6 +113,8 @@ wrangler deploy
 ```
 
 ## 版本
+
+- v3.14.0：Complete Source Audit：修正 v3.13 仍沿用舊版 120k/24k analysis-only 隱藏 context 限制的問題。GitHub 完整檔案、normalizeFiles 與 AI A 主審查統一為單檔 120,000 / 總計 360,000 字元；不再把 GitHub 已完整取得的核心檔案在進入主審查前二次截斷。AI B 仍保留獨立 Reviewer context budget，作為第二視角而非假裝完整讀取。
 
 - v3.13.0：Full Repo Audit 第一階段：GitHub 審查讀取上限提升至 30 檔、單檔 60,000 字元、總計 240,000 字元；後端分析同步提升單檔與總 context 預算，降低核心原始碼被過早標記 `[TRUNCATED]` 的情況。Reviewer 仍保留獨立 context budget，避免超出模型 context window；報告必須如實標示任何仍未完整讀取的檔案。
 
