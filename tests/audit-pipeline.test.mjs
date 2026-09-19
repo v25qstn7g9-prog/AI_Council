@@ -101,4 +101,30 @@ const reportSectionsBase=[
   assert.equal(rejected.complete,false,"結論本身淡化 critical finding 時仍應被擋下");
 }
 
+const numberedReportSections=[
+  ...reportSectionsBase.slice(0,-1),
+  "## 12. AI A / AI B 分歧與 AI C 裁決\n本批次無重大問題；其他批次仍有 Critical 缺陷。",
+];
+{
+  const reportCriticalConclusion=[...numberedReportSections,"## 13. 最終結論\n存在 Critical 缺陷，不符合部署標準。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportCriticalConclusion}));
+  const accepted=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(accepted.complete,true,"第 12 節的正常描述不得污染第 13 節的 Critical 結論");
+}
+{
+  const reportUnsafeConclusion=[...numberedReportSections,"## 13. 最終結論\n沒有重大問題，整體品質良好。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportUnsafeConclusion}));
+  const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(rejected.complete,false,"第 13 節自己淡化 Critical 時必須拒絕");
+}
+{
+  const reportUnsafeConclusion=[...numberedReportSections,"## 修正建議與最終結論\n沒有重大問題，整體品質良好。"]
+    .join("\n\n")+"\n\n"+"具體證據內容。".repeat(80);
+  const env=envWith(async()=>({response:reportUnsafeConclusion}));
+  const rejected=await synthesizeAuditEvidence({env,question:"審核",rawFiles:[{path:"evidence.md",content:"evidence"}],coverage:{pct:100,count:1,total:1},requiredFindings:integrity});
+  assert.equal(rejected.complete,false,"組合標題的最終結論同樣不得淡化 Critical");
+}
+
 console.log("audit-pipeline tests: ok");

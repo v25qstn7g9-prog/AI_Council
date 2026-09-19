@@ -590,7 +590,12 @@ ${context}
     const missingFindingIds=requiredIds.filter(id=>!report.includes(id));
     // 只掃描「最終結論」相關章節，避免報告如實描述某個批次/面向沒有重大問題時
     // 被全文比對誤判為淡化了其他批次已存在的 critical finding。
-    const conclusionSection=report.split(/^##\s*(?:12\.?|修正建議與最終結論|最終結論)/m).pop()||report;
+    const headings=[...report.matchAll(/^##[ \t]+([^\r\n]*)/gm)];
+    const conclusionIndex=headings.map(([,title])=>title.includes("最終結論")).lastIndexOf(true);
+    const conclusionSection=conclusionIndex<0?"":report.slice(
+      headings[conclusionIndex].index+headings[conclusionIndex][0].length,
+      headings[conclusionIndex+1]?.index??report.length
+    );
     const unsafeConclusion=hasCritical&&/整體(?:程式碼)?品質良好|沒有重大問題|無重大問題/.test(conclusionSection);
     return {complete:report.length>=500&&sectionCount>=13&&headingHits>=12&&!missingFindingIds.length&&!unsafeConclusion,report,sectionCount,headingHits,length:report.length,missingFindingIds,unsafeConclusion};
   };
