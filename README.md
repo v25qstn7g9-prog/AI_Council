@@ -1,6 +1,10 @@
-# AI 圓桌 v4.4.0｜Direct Evidence Synthesis
+# AI 圓桌 v4.5.0｜Guaranteed Audit Delivery
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.5.0：Guaranteed Audit Delivery
+
+修正報告下載只有「後端沒有回傳可用的 Audit Report」的問題。Full Repo Audit 的批次審查改為受控雙工並行；Primary Evidence Synthesis 未達門檻時，不再把同一份證據送給同一模型重試，而是由本地確定性程序立即組裝 Coverage、未審查檔案與完整批次證據附錄。前端也不再把空字串偽造成可下載報告。
 
 
 ## v4.4.0：Single-pass Evidence Synthesis
