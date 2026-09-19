@@ -478,13 +478,13 @@ async function run(){
     addCard("card","🐙 GitHub",`Repository：${repoName}\nBase：${base}`);
     status.textContent="GitHub 讀取原始碼…";
     try{
-      const dryRun = /不要(?:任何)?修改|不要修改|只分析|純分析|分析即可|不要建立 PR|不要建立PR|不要產生 PR|不要產生PR/i.test(question);
+      const dryRun = /不要(?:任何)?修改|不要修改|只分析|純分析|分析即可|審查|檢查|分析程式|review|audit|不要建立 PR|不要建立PR|不要產生 PR|不要產生PR/i.test(question) && !/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|fix|change|refactor|delete|remove|add|replace/i.test(question);
       const controller = new AbortController();
       let timeoutId = setTimeout(()=>controller.abort(), 120000);
       const r=await fetch("/github/engineering",{
         method:"POST",
         headers:{"content-type":"application/json"},
-        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun,reportMode:/完整報告|詳細報告|產生報告|生成報告|audit report|full report/i.test(question)}),
+        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun,reportMode:/完整報告|詳細報告|產生報告|生成報告|審查|檢查|分析程式|review|audit|full report/i.test(question)}),
         signal:controller.signal
       });
       clearTimeout(timeoutId);
