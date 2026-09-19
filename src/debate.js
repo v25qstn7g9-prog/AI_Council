@@ -571,8 +571,7 @@ ${b}
 - 只根據目前真的看到的程式碼，整理根因、已證實問題、推測、待驗證事項與具體修正建議
 - 如果沒有足夠證據，明確標示待驗證
 
-請只輸出一個 JSON code fence：
-```json
+請只輸出一個 JSON 物件，不要使用 Markdown code fence：
 {
   "summary": "簡短結論",
   "rootCause": "根因；不確定就明確寫不確定",
@@ -582,8 +581,7 @@ ${b}
   "review": ["Reviewer 核對重點"],
   "instructions": ["後續建議"],
   "sources": []
-}
-````;
+};
 
     const analysisResult = await askA(env.AI, env, [
       { role:"system", content:"你是資深軟體 Code Review Lead。只做證據導向的程式碼分析，不輸出檔案，不做修改。用繁體中文，精準務實。" },
