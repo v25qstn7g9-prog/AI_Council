@@ -198,10 +198,10 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   return { text: await askGemini(env, key, messages, maxTokens, temperature), source: `Gemini ${geminiName}` };
 }
 
-async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35) {
+async function askA(ai, env, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
   const provider = normalizeProvider(env.COUNCIL_A_PROVIDER, "cloudflare");
   try {
-    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "A");
+    return await askProvider(ai, env, provider, messages, maxTokens, temperature, "A", timeoutMs);
   } catch (e) {
     if (provider === "cloudflare") {
       const key = await getSecret(env, "GEMINI_API_KEY");
@@ -603,7 +603,7 @@ ${b}
     const reportResult = await askA(env.AI, env, [
       { role:"system", content:"你是資深軟體工程 Audit Lead。只輸出完整 Markdown 工程審查報告，不輸出 JSON，不修改程式。用繁體中文，證據導向。" },
       { role:"user", content:reportPrompt },
-    ], 6500, 0.1);
+    ], 6500, 0.1, FALLBACK_TIMEOUT_MS);
 
     const report = String(reportResult.text || "").trim();
     const summary = report
