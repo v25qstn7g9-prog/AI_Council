@@ -24,7 +24,11 @@ const DENIED_PREFIXES = [
 ];
 const DENIED_EXACT = new Set([
   ".env",".env.local",".env.production",".dev.vars",
-  "wrangler.toml","wrangler.json","secrets.json"
+  "wrangler.toml","wrangler.json","wrangler.jsonc","secrets.json"
+]);
+const DENIED_WRITE_EXACT = new Set([
+  ...DENIED_EXACT,
+  "package-lock.json","pnpm-lock.yaml","yarn.lock"
 ]);
 
 function json(data, status = 200) {
