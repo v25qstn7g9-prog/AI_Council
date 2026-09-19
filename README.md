@@ -1,6 +1,10 @@
-# AI 圓桌 v4.5.2｜Mandatory Engineering Report
+# AI 圓桌 v4.5.3｜Reliable Batch Audit
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.5.3：Reliable Batch Audit
+
+修正 Full Repo Audit 出現 0% Coverage、所有批次均逾時的問題。批次目標由 280,000 降為 80,000 字元，改為單批依序執行以避免並發壓力；每批先用較快的 Reviewer 模型，30 秒內失敗則切換主模型。批次失敗時，報告會區分逾時、額度／速率限制與模型服務未回應，不再只顯示模糊的「失敗或逾時」。
 
 ## v4.5.2：Mandatory Engineering Report
 
