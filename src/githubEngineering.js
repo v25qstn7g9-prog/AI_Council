@@ -10,8 +10,8 @@ import { runEngineeringCouncil } from "./debate.js";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
 const MAX_FILES = 30;
-const MAX_FILE_CHARS = 60000;
-const MAX_TOTAL_FILE_CHARS = 240000;
+const MAX_FILE_CHARS = 120000;
+const MAX_TOTAL_FILE_CHARS = 360000;
 const MAX_BLOB_CONCURRENCY = 5;
 const GITHUB_REQUEST_TIMEOUT_MS = 20000;
 const MAX_TREE_ENTRIES = 5000;
@@ -226,15 +226,17 @@ async function fetchRepoFiles(env, fullName, base) {
     for (const { entry, blob } of blobs) {
       if (total >= MAX_TOTAL_FILE_CHARS) break;
       if (blob?.encoding !== "base64" || typeof blob.content !== "string") continue;
-      let content = base64ToUtf8(blob.content);
+      const fullContent = base64ToUtf8(blob.content);
       const remaining = MAX_TOTAL_FILE_CHARS - total;
-      content = content.slice(0, Math.min(MAX_FILE_CHARS, remaining));
-      if (!content) continue;
-      total += content.length;
+      // Full Repo Audit 不再把單一 GitHub blob 靜默切半。
+      // 只有整份檔案能放進本輪預算才交給 AI；否則跳過並由 metadata 標示，
+      // 避免 AI 收到看似完整、實際缺尾端的原始碼。
+      if (!fullContent || fullContent.length > MAX_FILE_CHARS || fullContent.length > remaining) continue;
+      total += fullContent.length;
       files.push({
         path: entry.path,
-        content,
-        size: Number(entry.size || content.length),
+        content: fullContent,
+        size: Number(entry.size || fullContent.length),
       });
     }
   }
