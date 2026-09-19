@@ -1,4 +1,4 @@
-# AI 圓桌 v3.10.1｜Cloudflare 自動切 Gemini 3.5 備援版
+# AI 圓桌 v3.12.0｜GitHub 工程 Audit Report 強化版
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
 
@@ -113,6 +113,8 @@ wrangler deploy
 ```
 
 ## 版本
+
+- v3.12.0：強化 GitHub 工程 Audit Report：報告完整度驗證、自動重試與 fallback、GitHub 模式顯示使用者送出文字、180 秒工程等待時間、完整 Markdown 報告下載，以及 iOS 單一檔案下載修正。
 
 - v3.11.0：新增 GitHub 工程模式：可直接讀取授權 repository，由 AI A / AI B 討論與產生最小修改，建立獨立 branch 與 Draft Pull Request。
 
