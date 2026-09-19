@@ -423,6 +423,7 @@ async function run(){
   q.value="";
 
   if(githubMode.checked){
+    forceDismissKeyboard();
     const repoName=githubRepo.value;
     const base=githubBase.value.trim()||"main";
     if(!repoName){
