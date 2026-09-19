@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.5.3";
+const VERSION = "4.6.0";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
@@ -551,23 +551,32 @@ ${context || "（無檔案）"}
 ## 安全性與錯誤處理
 ## 效能與可維護性
 ## 待跨檔驗證
-重大問題必須指出檔案與可見證據；沒有證據就不要列為已證實。不要修改程式、不要輸出完整檔案。控制在 1800 字內。`;
+重大問題必須指出檔案與可見證據；沒有證據就不要列為已證實。不要修改程式、不要輸出完整檔案。控制在 1400 字內。`;
   const messages=[
     { role:"system", content:"你是大型 repository 的批次 Code Review 工程師。只根據完整可見原始碼建立證據。" },
     { role:"user", content:prompt },
   ];
-  let result;
-  try {
-    // Qwen Reviewer 較快，且 80k 字元批次能落在其 context 預算內。
-    result=await askB(env.AI,env,messages,2200,0.1,AUDIT_BATCH_TIMEOUT_MS);
-  } catch (reviewerError) {
-    // Reviewer 不可用時改用主模型；兩者都失敗才由上層標示該批未審查。
-    result=await askA(env.AI,env,messages,2200,0.1,AUDIT_BATCH_TIMEOUT_MS);
-    result.debug=[result.debug,"Reviewer 失敗，批次已切換主模型"].filter(Boolean).join("；");
+  // v4.6：每批真正同時交給 A 與 B。批次間仍維持 concurrency=1，
+  // 避免多批一起轟炸 provider；同批 A/B 並行可把整體等待控制在前端時限內。
+  const [aSettled,bSettled]=await Promise.allSettled([
+    askA(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
+    askB(env.AI,env,messages,1800,0.1,AUDIT_BATCH_TIMEOUT_MS),
+  ]);
+  const aOk=aSettled.status==="fulfilled";
+  const bOk=bSettled.status==="fulfilled";
+  if (!aOk&&!bOk) {
+    const reasons=[aSettled.reason,bSettled.reason].map(x=>String(x?.message||x||"")).join("；");
+    throw new Error(reasons||"AI A 與 AI B 均未回應");
   }
+  const aText=aOk?String(aSettled.value.text||"").trim():"本批 AI A 審查失敗或逾時。";
+  const bText=bOk?String(bSettled.value.text||"").trim():"本批 AI B 審查失敗或逾時。";
   return {
-    text:String(result.text || "").trim(),
-    source:result.source,
+    text:`## AI A 批次審查\n\n${aText}\n\n## AI B 批次審查\n\n${bText}`,
+    a:aText,
+    b:bText,
+    aOk,bOk,
+    aSource:aOk?aSettled.value.source:"unavailable",
+    bSource:bOk?bSettled.value.source:"unavailable",
     filesReceived:files.map(f=>({path:f.path,truncated:f.truncated})),
   };
 }
