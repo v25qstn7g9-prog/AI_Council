@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "echo 'no build step required'",
     "test": "node tests/audit-pipeline.test.mjs"
   }
 }
