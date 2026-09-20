@@ -1,0 +1,13 @@
+{
+  "app": "4.9.3",
+  "lastUpdated": "2026-09-20",
+  "runtime": {
+    "debate": "4.9.3"
+  },
+  "regressions": [
+    "4.9.1",
+    "4.9.2",
+    "4.9.3"
+  ],
+  "tests": "node tests/audit-pipeline.test.mjs"
+}
