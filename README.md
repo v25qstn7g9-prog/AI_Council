@@ -1,6 +1,10 @@
-# AI 圓桌 v4.9.0｜Evidence Verdict Gate
+# AI 圓桌 v4.9.3｜Evidence Verdict Gate
 
 這版不是單純「兩個 AI 聊天」，而是把圓桌改成軟體工程工作流。
+
+## v4.9.3：Regression Maintenance Sync
+
+同步目前已存在的 v4.9.1～v4.9.3 regression 修正：最終結論安全檢查只鎖定真正的「最終結論」章節、支援帶編號或不帶編號的結論標題，並修正 GitHub 任務分類的英文單詞邊界，避免 `address`、`additional` 被誤判為 `add` 修改要求。本版同步 README、UI、runtime 與 package 版本，不改既有 A/B/C 架構。
 
 ## v4.9.0：Evidence Verdict Gate
 
