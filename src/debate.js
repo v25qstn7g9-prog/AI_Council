@@ -1,5 +1,5 @@
 /**
- * debate.js — ai-council-v3.12.0
+ * debate.js — ai-council-v4.9.3
  *
  * POST /debate
  * body:
@@ -13,7 +13,7 @@
  * }
  */
 
-const VERSION = "4.9.0";
+const VERSION = "4.9.3";
 const MODEL_A_FALLBACK = "@cf/openai/gpt-oss-120b";
 const MODEL_B = "@cf/qwen/qwen3-30b-a3b-fp8";
 const MODEL_C = "@cf/mistralai/mistral-small-3.1-24b-instruct";
