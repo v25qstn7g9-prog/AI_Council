@@ -136,7 +136,13 @@ export async function runSelfReview(env) {
   const files = [];
   for (const path of SELF_REVIEW_FILES) {
     const content = await fetchRepoFile(env, path, base);
-    if (content != null) files.push({ path, content, size: content.length });
+    if (content != null) {
+      if (content.length > 0) {
+        files.push({ path, content, size: content.length });
+      } else {
+        files.push({ path, content: "", size: 0 });
+      }
+    }
   }
   if (!files.length) {
     throw new Error("讀不到任何原始碼檔案，請確認 GITHUB_OWNER / GITHUB_REPO / GITHUB_TOKEN / GITHUB_BASE_BRANCH 設定正確，以及 Token 有 repo 讀取權限");
