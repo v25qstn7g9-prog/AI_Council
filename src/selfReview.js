@@ -7,6 +7,7 @@ import { runEngineeringCouncil } from "./debate.js";
 const SELF_REVIEW_FILES = [
   "src/worker.js",
   "src/debate.js",
+  "src/githubEngineering.js",
   "src/usage.js",
   "src/selfReview.js",
   "public/index.html",
