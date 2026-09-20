@@ -115,6 +115,8 @@ export async function onRequestGet({ env }) {
 
 async function readSecret(env, name) {
   let value = env?.[name];
-  if (value && typeof value.get === "function") value = await value.get();
+  try {
+    if (value && typeof value.get === "function") value = await value.get();
+  } catch { return ""; }
   return String(value || "").trim();
 }
