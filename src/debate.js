@@ -91,7 +91,7 @@ async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35, ti
 }
 
 async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
-  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
+  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.5-flash").trim();
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
@@ -205,7 +205,7 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
-  const geminiName = String(env.GEMINI_MODEL || "gemini-3.5-flash-lite").trim();
+  const geminiName = String(env.GEMINI_MODEL || "gemini-3.5-flash").trim();
   return { text: await askGemini(env, key, messages, maxTokens, temperature, timeoutMs), source: `Gemini ${geminiName}` };
 }
 
