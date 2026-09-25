@@ -91,7 +91,8 @@ async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35, ti
 }
 
 async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
-  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.6-flash").trim();
+  const configuredGeminiModel = String(env?.GEMINI_MODEL || "").trim();
+  const geminiModel = (!configuredGeminiModel || /^gemini-(?:2|3\.5)(?:\.|-|$)/i.test(configuredGeminiModel)) ? "gemini-3.6-flash" : configuredGeminiModel;
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
@@ -149,7 +150,7 @@ function normalizeProvider(value, fallback = "cloudflare") {
 export async function councilModelConfig(env) {
   const providers = [
     {id:"cloudflare",name:"Cloudflare",model:"GPT-OSS · Qwen · Mistral",available:Boolean(env.AI)},
-    {id:"gemini",name:"Gemini",model:String(env.GEMINI_MODEL||"gemini-3.6-flash"),available:Boolean(await getSecret(env,"GEMINI_API_KEY"))},
+    {id:"gemini",name:"Gemini",model:((m=>!m||/^gemini-(?:2|3\.5)(?:\.|-|$)/i.test(m)?"gemini-3.6-flash":m)(String(env.GEMINI_MODEL||"").trim())),available:Boolean(await getSecret(env,"GEMINI_API_KEY"))},
     {id:"openai",name:"OpenAI",model:String(env.OPENAI_MODEL||DEFAULT_OPENAI_MODEL),available:Boolean(await getSecret(env,"OPENAI_API_KEY"))},
     {id:"anthropic",name:"Claude",model:String(env.ANTHROPIC_MODEL||DEFAULT_ANTHROPIC_MODEL),available:Boolean(await getSecret(env,"ANTHROPIC_API_KEY"))},
   ];
