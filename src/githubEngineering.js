@@ -5,7 +5,7 @@
  * 最後只建立新 branch + Pull Request，不直接修改 base branch。
  */
 
-import { runEngineeringCouncil, runAuditBatch, runAuditBatchFallback, runFixDirectionReview, runPostFixReview, synthesizeAuditEvidence } from "./debate.js";
+import { runEngineeringCouncil, runAuditBatch, runAuditBatchFallback, runFixDirectionReview, runPostFixReview, synthesizeAuditEvidence, configureCouncil } from "./debate.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TASK_CHARS = 4000;
@@ -1027,6 +1027,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
 export async function handleGitHubEngineering(request, env) {
   try {
     const body = await readJsonBody(request);
+    env = await configureCouncil(env, body?.routing);
     const result = await runGitHubEngineering(env, {
       repoFullName: body?.repoFullName,
       base: body?.base,
