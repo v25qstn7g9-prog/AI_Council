@@ -91,7 +91,7 @@ async function ask(ai, model, messages, maxTokens = 1200, temperature = 0.35, ti
 }
 
 async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 0.35, timeoutMs = PRIMARY_TIMEOUT_MS) {
-  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.5-flash").trim();
+  const geminiModel = String(env?.GEMINI_MODEL || "gemini-3.6-flash").trim();
   const systemMsg = messages.find(m => m.role === "system");
   const userParts = messages.filter(m => m.role !== "system").map(m => ({ text: m.content }));
 
@@ -149,7 +149,7 @@ function normalizeProvider(value, fallback = "cloudflare") {
 export async function councilModelConfig(env) {
   const providers = [
     {id:"cloudflare",name:"Cloudflare",model:"GPT-OSS · Qwen · Mistral",available:Boolean(env.AI)},
-    {id:"gemini",name:"Gemini",model:String(env.GEMINI_MODEL||"gemini-3.5-flash"),available:Boolean(await getSecret(env,"GEMINI_API_KEY"))},
+    {id:"gemini",name:"Gemini",model:String(env.GEMINI_MODEL||"gemini-3.6-flash"),available:Boolean(await getSecret(env,"GEMINI_API_KEY"))},
     {id:"openai",name:"OpenAI",model:String(env.OPENAI_MODEL||DEFAULT_OPENAI_MODEL),available:Boolean(await getSecret(env,"OPENAI_API_KEY"))},
     {id:"anthropic",name:"Claude",model:String(env.ANTHROPIC_MODEL||DEFAULT_ANTHROPIC_MODEL),available:Boolean(await getSecret(env,"ANTHROPIC_API_KEY"))},
   ];
@@ -229,7 +229,7 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
-  const geminiName = String(env.GEMINI_MODEL || "gemini-3.5-flash").trim();
+  const geminiName = String(env.GEMINI_MODEL || "gemini-3.6-flash").trim();
   return { text: await askGemini(env, key, messages, maxTokens, temperature, timeoutMs), source: `Gemini ${geminiName}` };
 }
 
@@ -285,7 +285,7 @@ async function askCAudit(ai, env, messages, maxTokens = 1200, temperature = 0.1,
   if (key) {
     try {
       const text=await askGemini(env,key,messages,maxTokens,temperature,FALLBACK_TIMEOUT_MS);
-      return {text,source:"Gemini 3.5（AI C 第三備援）",debug:failures.join("；")};
+      return {text,source:"Gemini 3.6（AI C 第三備援）",debug:failures.join("；")};
     } catch (error) {
       failures.push(`Gemini C: ${sanitizeInternalError(error)}`);
     }
