@@ -230,7 +230,8 @@ async function askProvider(ai, env, provider, messages, maxTokens = 1200, temper
   }
   const key = await getSecret(env, "GEMINI_API_KEY");
   if (!key) throw new Error("未設定 GEMINI_API_KEY");
-  const geminiName = String(env.GEMINI_MODEL || "gemini-3.6-flash").trim();
+  const configuredGeminiName = String(env.GEMINI_MODEL || "").trim();
+  const geminiName = (!configuredGeminiName || /^gemini-(?:2|3\.5)(?:\.|-|$)/i.test(configuredGeminiName)) ? "gemini-3.6-flash" : configuredGeminiName;
   return { text: await askGemini(env, key, messages, maxTokens, temperature, timeoutMs), source: `Gemini ${geminiName}` };
 }
 
