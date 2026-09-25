@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "echo 'no build step required'",
-    "test": "node tests/audit-pipeline.test.mjs"
+    "test": "node tests/audit-pipeline.test.mjs && node --test tests/provider-routing.test.mjs"
   },
   "version": "4.9.3"
 }
