@@ -292,7 +292,15 @@ async function loadGitHubRepos(){
       githubRepo.append(o);
     }
     if(!githubRepo.options.length)throw Error("沒有可用 repository");
-    githubBase.value=githubRepo.options[0].dataset.branch||"main";
+    let savedRepo="",savedBase="";
+    try{
+      savedRepo=localStorage.getItem("council.githubRepo")||"";
+      savedBase=localStorage.getItem("council.githubBase")||"";
+    }catch{}
+    const savedOption=[...githubRepo.options].find(o=>o.value===savedRepo);
+    if(savedOption)githubRepo.value=savedRepo;
+    const selected=githubRepo.options[githubRepo.selectedIndex]||githubRepo.options[0];
+    githubBase.value=savedBase||selected?.dataset?.branch||"main";
   }catch(e){
     githubReposLoaded=false;
     githubRepo.innerHTML='<option value="">GitHub 連線失敗</option>';
@@ -302,9 +310,17 @@ async function loadGitHubRepos(){
 githubRepo.onchange=()=>{
   const o=githubRepo.options[githubRepo.selectedIndex];
   if(o?.dataset?.branch)githubBase.value=o.dataset.branch;
+  try{
+    localStorage.setItem("council.githubRepo",githubRepo.value||"");
+    localStorage.setItem("council.githubBase",githubBase.value||"main");
+  }catch{}
 };
+githubBase.addEventListener("change",()=>{
+  try{localStorage.setItem("council.githubBase",githubBase.value||"main");}catch{}
+});
 githubMode.onchange=async()=>{
   const on=githubMode.checked;
+  try{localStorage.setItem("council.githubMode",on?"1":"0");}catch{}
   githubControls.style.display=on?"block":"none";
   githubState.textContent=on?"ON · GitHub + ABC 三層審核 + Draft PR":"OFF · 直接讀 GitHub 實際原始碼";
   githubState.className="badge "+(on?"ok":"");
@@ -686,6 +702,12 @@ q.addEventListener("blur",()=>{window.scrollTo(0,bgScrollY);});
 
 renderFiles();
 loadModelConfig();
+try{
+  if(localStorage.getItem("council.githubMode")==="1"){
+    githubMode.checked=true;
+    githubMode.onchange();
+  }
+}catch{}
 </script>
 </body>
 </html>
