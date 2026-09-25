@@ -888,6 +888,59 @@ export async function listGitHubRepos(env) {
     }));
 }
 
+function isPresentationOnlyTask(question) {
+  const text=String(question||"");
+  const uiIntent=/UI|UX|介面|界面|美化|排版|視覺|質感|字體|間距|卡片|按鈕|輸入框|導覽|留白|responsive|mobile|手機版|design|polish|style|styling/i.test(text);
+  const preserveLogic=/不改|不要改|保留|只改介面|只改.*視覺|不碰.*功能|不動.*功能|without changing/i.test(text);
+  const riskyIntent=/修復.*功能|修正.*邏輯|新增.*功能|API.*修改|資料格式.*修改|演算法.*修改|重構.*JS|framework migration|框架遷移/i.test(text);
+  return uiIntent && preserveLogic && !riskyIntent;
+}
+
+function buildPresentationDirection(snapshotFiles) {
+  const scopeFiles=(snapshotFiles||[])
+    .map(f=>String(f?.path||""))
+    .filter(p=>isWritablePath(p) && (/\.css$/i.test(p) || /^public\/.*\.html?$/i.test(p) || /(?:^|\/)index\.html?$/i.test(p)))
+    .slice(0,6);
+  return {
+    approved:true,
+    deterministic:true,
+    direction:{
+      rootCause:"這是介面視覺改善任務，不以缺陷根因作為修改前提；採用最小 presentation-only 變更。",
+      intent:"保留既有功能與事件處理，只改善視覺層級、間距、字體、卡片、按鈕與響應式呈現。",
+      options:[{name:"Presentation-only polish",change:"僅調整既有 HTML/CSS presentation layer，不遷移框架、不重寫功能邏輯。",risk:"低；仍需機械檢查 script 與既有函式是否維持。",verification:["既有函式完整保留","HTML 內 script 內容不變","修改範圍小於既定門檻"]}],
+      recommended:"Presentation-only polish",
+      why:"符合使用者明確要求，且比一般 Fix Direction Reviewer 的架構重構建議更小、更可驗證。",
+      scopeFiles,
+      successCriteria:["不修改 API/AI/計算/資料邏輯","不刪除既有函式","不變更 HTML 內 script 程式","只做最小 UI/CSS 改善"],
+      confidence:"high",
+      pending:[]
+    },
+    reviewer:"Presentation-only 任務使用確定性安全範圍；不要求以 bug 根因證明視覺改善的必要性。",
+    aSource:"deterministic",
+    bSource:"deterministic"
+  };
+}
+
+function scriptBodies(html) {
+  const text=String(html||"");
+  return [...text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(m=>m[1].trim());
+}
+
+function presentationRegressionGate(proposed, originalMap) {
+  const checks=[];
+  for(const file of proposed){
+    const before=originalMap.get(file.path)||"";
+    if(/\.html?$/i.test(file.path)){
+      const a=scriptBodies(before),b=scriptBodies(file.content);
+      if(a.length!==b.length || a.some((x,i)=>x!==b[i])){
+        return {ok:false,reason:`Presentation-only 任務偵測到 script 程式被修改：${file.path}`,checks};
+      }
+    }
+    checks.push({path:file.path,scriptsPreserved:true});
+  }
+  return {ok:true,checks};
+}
+
 export function classifyGitHubTask(question, {reportMode=false,dryRun=false}={}) {
   const text=String(question||"");
   // 英文關鍵字必須加單詞邊界，否則像 "address"、"additional" 這類詞
@@ -913,6 +966,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   // v4.5.2：任何修改流程都必須附工程察核報告，不再依賴使用者是否剛好輸入
   // 「審查／檢查」等特定關鍵字；並補齊台灣常用的察核／查核／稽核／審核。
   const {modificationRequested,reportRequested,analysisOnly}=classifyGitHubTask(question,{reportMode,dryRun});
+  const presentationOnly=isPresentationOnlyTask(question);
 
   if (analysisOnly && reportRequested) {
     const audit=await runFullRepoBatchAudit(env,fullName,safeBase,question);
@@ -940,8 +994,10 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
 
   let fixDirection=null;
   if (!analysisOnly && modificationRequested) {
-    const directionReview=await runFixDirectionReview({env,task:question,rawFiles:snapshot.files,finding:question});
-    if (!directionReview.approved) {
+    const directionReview=presentationOnly
+      ? buildPresentationDirection(snapshot.files)
+      : await runFixDirectionReview({env,task:question,rawFiles:snapshot.files,finding:question});
+    if (!directionReview.approved || !directionReview.direction?.scopeFiles?.length) {
       return ensureRequestedEngineeringReport({ok:true,action:"direction_not_approved",repository:fullName,base:safeBase,
         scannedFiles:snapshot.files.map(f=>f.path),fixDirection:directionReview,
         final:"修正方向尚未通過 Verified Fix Direction Gate，因此沒有修改檔案或建立 PR。",
@@ -953,7 +1009,7 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   const result = await runEngineeringCouncil({
     env,
     question:
-      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}${fixDirection ? `\n\n【已核准 Fix Direction】\n${JSON.stringify(fixDirection.direction)}\n只能依 scopeFiles 與 recommended 方案修改，不得自行換方案或擴大範圍。` : ""}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 主審，再由 AI B 反方複審，最後由獨立 AI C 裁決證據並整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
+      `【GitHub 工程模式】\nRepository：${fullName}\nBase：${safeBase}\n\n${question}${fixDirection ? `\n\n【已核准 Fix Direction】\n${JSON.stringify(fixDirection.direction)}\n只能依 scopeFiles 與 recommended 方案修改，不得自行換方案或擴大範圍。${presentationOnly ? "\n本任務為 presentation-only：禁止修改任何 <script> 內容、API、AI、資料、計算與事件處理；禁止框架遷移或功能重構。優先只調整現有 CSS。" : ""}` : ""}\n\n規則：直接以附件中的 GitHub 原始碼為準。只修改確定有問題或明確能改善的地方。不得修改 secrets、.env、.github/workflows、node_modules、build/dist。輸出的 files 必須是完整檔案內容，不得輸出 diff 片段。先由 AI A 主審，再由 AI B 反方複審，最後由獨立 AI C 裁決證據並整合成可提交的最小變更。**禁止為了修一個局部問題而重寫整個檔案；除非任務明確要求重構/刪除，否則必須保留原檔既有功能、函式與事件處理。若無法完整保留，請不要輸出該檔案。**`,
     rawFiles: snapshot.files,
     rawImages: [],
     webSearch: false,
@@ -969,8 +1025,10 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
     if(!mechanical.ok) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:mechanical,a:result.a,b:result.b,c:result.c,final:"修改未通過 Mechanical Fix Gate，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     const afterFiles=proposed.map(f=>({path:f.path,content:f.content,truncated:false}));
     const beforeFiles=proposed.map(f=>({path:f.path,content:originalMap.get(f.path),truncated:false}));
-    const post=await runPostFixReview({env,task:question,beforeFiles,afterFiles,direction:fixDirection.direction});
-    if(!post.approved) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:{mechanical,post},a:result.a,b:result.b,c:result.c,final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
+    const post=presentationOnly
+      ? presentationRegressionGate(proposed,originalMap)
+      : await runPostFixReview({env,task:question,beforeFiles,afterFiles,direction:fixDirection.direction});
+    if((presentationOnly && !post.ok) || (!presentationOnly && !post.approved)) return ensureRequestedEngineeringReport({ok:true,action:"verification_failed",repository:fullName,base:safeBase,scannedFiles:snapshot.files.map(f=>f.path),changedFiles:proposed.map(f=>f.path),fixDirection,verification:{mechanical,post},a:result.a,b:result.b,c:result.c,final:"修改未通過 Before/After Regression Review，因此沒有建立 PR。",artifact:result.artifact||null},question,reportRequested);
     result.fixVerification={mechanical,post};
   }
   if (analysisOnly || !proposed.length) {
