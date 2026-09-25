@@ -51,14 +51,37 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
   .chatBox{height:52vh;min-height:280px}
 }
 </style>
+<style>
+:root{--bg:#0b101a;--panel:#141d2b;--line:#29354a;--sub:#a5b3c8;--gold:#e8c780}
+body{background:radial-gradient(ellipse at 80% 0%,#1b2b44 0,transparent 48%),var(--bg);line-height:1.5}
+.app{max-width:1040px;padding:24px 20px 210px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0 20px}h1{font-size:26px;letter-spacing:-.7px;margin:3px 0 6px}.eyebrow{font-size:10px;letter-spacing:2px;color:var(--gold);font-weight:800}.header-mark{width:48px;height:48px;display:grid;place-items:center;border:1px solid #52617a;border-radius:16px;color:var(--gold);font-size:25px;background:#1b2940}
+.panel,.card{border-radius:18px;padding:18px;box-shadow:0 8px 30px #00000018}.who{font-size:12px;letter-spacing:.2px}.sub,.small{font-size:12px;line-height:1.6}
+.model-panel{background:linear-gradient(125deg,#1c2a40,#141d2b);margin-top:0}.model-grid{display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);gap:12px;align-items:end;margin:12px 0}.model-grid label{display:grid;gap:6px;font-size:12px;color:var(--sub)}select{width:100%;min-height:44px;font-size:14px}.swap{height:44px;font-size:19px;padding:8px}.model-panel .row{gap:10px}.model-panel .who{margin:0;color:var(--text)}
+.workspace-settings{margin:12px 0;border:1px solid var(--line);border-radius:16px;background:#121b28}.workspace-settings>summary{padding:14px 16px;cursor:pointer;font-size:13px;font-weight:650;color:var(--sub)}.workspace-settings[open]>summary{border-bottom:1px solid var(--line);color:var(--text)}.workspace-settings .panel{margin:10px;border-radius:12px;padding:13px;box-shadow:none}.drop{padding:14px}.toggle input{display:block;position:absolute;width:100%;height:100%;opacity:0;margin:0;z-index:1;cursor:pointer}.toggle input:focus-visible+.slider{outline:2px solid var(--gold);outline-offset:3px}
+.chatBox{height:auto;min-height:260px;overflow:visible;border:0;background:transparent;padding:0;margin:18px 0;box-shadow:none}.chatBox .card{margin:12px 0}.card.me{margin-left:12%;background:#1d2b40;border-color:#354a66}.card.a,.card.b,.card.c{border-color:var(--line);border-left:3px solid var(--a)}.card.b{border-left-color:var(--b)}.card.c{border-left-color:var(--c)}pre{font-size:14px;line-height:1.8;overflow-wrap:anywhere}.response-details{border-top:1px solid var(--line);margin-top:12px;padding-top:5px}.response-details summary{padding:8px 0;cursor:pointer;font-size:12px;color:var(--sub)}.copy-response{margin-top:12px;font-size:11px;min-height:34px;padding:6px 10px}.empty-state{text-align:center;padding:36px 18px;color:var(--sub)}.empty-state strong{display:block;font-size:20px;color:var(--text);margin-bottom:8px}
+footer{background:linear-gradient(transparent,#0b101a 18%);padding-top:20px;z-index:10}.composer{max-width:1000px;padding:12px;border-radius:20px;background:#172235;box-shadow:0 16px 48px #0008}.composer textarea{height:74px;font-size:16px;line-height:1.5}.composer .row{padding:4px 3px}.composer button{min-height:44px}button{transition:background .15s,transform .15s}button:active{transform:translateY(1px)}button:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--gold);outline-offset:3px}button:disabled{cursor:wait}.badge{font-size:11px;white-space:normal}#routeState{margin-top:6px}#status{border:0;padding-left:0;max-width:100%;overflow-wrap:anywhere}
+@media(max-width:520px){.app{padding:16px 12px 225px}h1{font-size:22px}.header-mark{width:40px;height:40px}.panel,.card{padding:14px}.model-grid{gap:8px;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr)}.model-grid select{font-size:13px;padding:8px 5px}.swap{padding:6px}.chatBox{height:auto;min-height:220px}.composer .row>div{margin-left:auto}.card.me{margin-left:6%}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+</style>
 </head>
 <body>
 <div class="app">
 <header>
-<h1>AI 圓桌 · 工程協作</h1>
+<div><div class="eyebrow">COUNCIL / AI WORKSPACE</div><h1>讓好答案，經得起推敲</h1>
 <div class="sub">AI A 主審 × AI B 反方複審 × AI C 證據裁決</div>
+</div><div class="header-mark" aria-hidden="true">✦</div>
 </header>
 
+<section class="panel model-panel" aria-label="AI 服務設定">
+<div class="row"><div class="who">AI 圓桌 · 主備援服務</div><span class="badge">自動接手 · 保留同次任務</span></div>
+<div class="model-grid">
+<label>主 AI 服務<select id="primaryProvider"><option value="auto">依伺服器設定</option></select></label>
+<button id="swapProviders" type="button" class="secondary swap" aria-label="互換主 AI 與備援 AI" title="互換主備援">⇄</button>
+<label>備援 AI 服務<select id="backupProvider"><option value="auto">自動選擇</option></select></label>
+</div>
+<div id="routeState" class="small" role="status">讀取已設定的 AI 服務…</div>
+</section>
+<details class="workspace-settings"><summary>附件與工作模式 · 搜尋 / 對話 / GitHub</summary>
 <div class="panel">
 <div class="who">專案附件</div>
 <div id="drop" class="drop">
@@ -109,7 +132,8 @@ button{border:0;border-radius:10px;padding:9px 13px;background:var(--gold);color
 </div>
 </div>
 
-<div id="chat" class="chatBox"></div>
+</details>
+<div id="chat" class="chatBox" role="log" aria-label="AI 對話結果"><div class="empty-state"><strong>把問題交給圓桌</strong>描述目標、貼上問題，或展開上方設定加入專案附件。<br>主答、複核與最終結論會依序顯示在這裡。</div></div>
 </div>
 
 <footer>
@@ -133,21 +157,48 @@ const drop=$("#drop"),picker=$("#picker"),filesBox=$("#files"),stats=$("#fileSta
 
 const TEXT_EXT=new Set(["html","htm","js","mjs","cjs","css","json","jsonc","md","txt","xml","yaml","yml","toml","csv","env"]);
 const IMG_EXT=new Set(["png","jpg","jpeg","webp"]);
-const MAX_TEXT_CHARS=30000, MAX_TOTAL_CHARS=180000, MAX_IMAGES=4, MAX_ZIP_ENTRIES=100;
+const MAX_TEXT_CHARS=120000, MAX_TOTAL_CHARS=360000, MAX_IMAGES=4, MAX_ZIP_ENTRIES=100;
 let workspace=new Map();
 let lastArtifact=null;
 let chatHistory=[];
 let preparedZipBlob=null;
 let preparedZipBusy=false;
 
+const primaryProvider=$("#primaryProvider"),backupProvider=$("#backupProvider"),swapProviders=$("#swapProviders"),routeState=$("#routeState");
+let modelConfig=null;
+function selectedRouting(){return {primary:primaryProvider.value,backup:backupProvider.value};}
+function saveRouting(){
+  if(primaryProvider.value!=="auto"&&primaryProvider.value===backupProvider.value)backupProvider.value="auto";
+  try{localStorage.setItem("council.routing",JSON.stringify(selectedRouting()));}catch{}
+  routeState.textContent="服務設定已套用；送出後會顯示實際回答模型與備援狀態。";
+}
+async function loadModelConfig(){
+  try{
+    const response=await fetch("/models");const data=await response.json();if(!response.ok||!data.ok)throw Error();modelConfig=data;
+    for(const select of [primaryProvider,backupProvider])for(const provider of data.providers){const option=document.createElement("option");option.value=provider.id;option.textContent=provider.name+(provider.available?"":" · 未設定");option.disabled=!provider.available;select.append(option);}
+    try{const saved=JSON.parse(localStorage.getItem("council.routing")||"null");for(const [key,select] of [["primary",primaryProvider],["backup",backupProvider]])if(saved?.[key]==="auto"||data.providers.some(p=>p.id===saved?.[key]&&p.available))select.value=saved[key];}catch{}
+    routeState.textContent=data.providers.filter(p=>p.available).map(p=>`${p.name} · ${p.model}`).join(" ／ ")||"尚無可用服務，請先設定伺服器金鑰。";
+  }catch{routeState.textContent="暫時無法讀取服務設定，送出時沿用伺服器預設。";}
+}
+primaryProvider.onchange=backupProvider.onchange=saveRouting;
+swapProviders.onclick=()=>{
+  const primary=primaryProvider.value==="auto"?modelConfig?.defaultPrimary:primaryProvider.value;
+  const backup=backupProvider.value==="auto"?(modelConfig?.providers||[]).find(p=>p.available&&p.id!==primary)?.id:backupProvider.value;
+  if(!primary||!backup||!(modelConfig?.providers||[]).some(p=>p.id===primary&&p.available)){routeState.textContent="請先設定至少兩個 AI 服務，才能互換主備援。";return;}
+  primaryProvider.value=backup;backupProvider.value=primary;saveRouting();
+};
+
 function ext(name){const p=String(name).split(".");return p.length>1?p.pop().toLowerCase():""}
 function human(n){if(n<1024)return n+" B";if(n<1048576)return (n/1024).toFixed(1)+" KB";return (n/1048576).toFixed(1)+" MB"}
 function addCard(cls,who,text){
+  chat.querySelector(".empty-state")?.remove();
   const d=document.createElement("div");d.className="card "+cls;
   const w=document.createElement("div");w.className="who";w.textContent=who;
   const p=document.createElement("pre");p.textContent=text;
-  d.append(w,p);chat.append(d);
-  requestAnimationFrame(()=>{chat.scrollTo({top:chat.scrollHeight,behavior:"smooth"})});
+  d.append(w);
+  if((cls==="a"||cls==="b")&&String(text||"").length>1000){const details=document.createElement("details"),summary=document.createElement("summary"),preview=document.createElement("pre");details.className="response-details";summary.textContent="展開完整回答";preview.textContent=String(text).slice(0,300)+"…";details.append(summary,p);d.append(preview,details);}else d.append(p);
+  const copy=document.createElement("button");copy.type="button";copy.className="secondary copy-response";copy.textContent="複製內容";copy.onclick=async()=>{try{await navigator.clipboard.writeText(String(text||""));copy.textContent="已複製";}catch{copy.textContent="請選取文字複製";}};d.append(copy);chat.append(d);
+  requestAnimationFrame(()=>{d.scrollIntoView({block:"nearest",behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"})});
   return d;
 }
 function renderFiles(){
@@ -477,6 +528,7 @@ async function run(){
     }
     addCard("card","🐙 GitHub",`Repository：${repoName}\nBase：${base}`);
     status.textContent="GitHub 讀取原始碼…";
+    let timeoutId;
     try{
       const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|fix|change|refactor|delete|remove|add|replace/i.test(question);
       const reviewRequested=/完整報告|詳細報告|產生報告|生成報告|察核|查核|稽核|審核|審查|檢查|分析程式|報告|review|audit|full report/i.test(question);
@@ -484,19 +536,20 @@ async function run(){
       // 每次修改都必須回傳工程報告；純分析則由審查關鍵字觸發。
       const reportMode=modificationRequested||reviewRequested;
       const controller = new AbortController();
-      let timeoutId = setTimeout(()=>controller.abort(), 480000);
+      timeoutId = setTimeout(()=>controller.abort(), 480000);
       const r=await fetch("/github/engineering",{
         method:"POST",
         headers:{"content-type":"application/json"},
-        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun,reportMode}),
+        body:JSON.stringify({repoFullName:repoName,base,task:question,dryRun,reportMode,routing:selectedRouting()}),
         signal:controller.signal
       });
       clearTimeout(timeoutId);
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
-      addCard("a","AI A · 主工程師",d.a||"");
-      addCard("b","AI B · Reviewer",d.b||"");
-      if(d.c)addCard("c","AI C · 證據裁決",d.c);
+      addCard("a",d.labels?.a||"AI A · 主工程師",d.a||"");
+      addCard("b",d.labels?.b||"AI B · Reviewer",d.b||"");
+      if(d.c)addCard("c",d.labels?.c||"AI C · 證據裁決",d.c);
+      if(d.debug)addCard("card","服務切換資訊",d.debug);
       // GitHub 工程模式也必須走 renderArtifact，否則後端雖然已產生
       // artifact.report，前端只顯示 d.final，永遠不會建立報告下載按鈕。
       if(d.artifact){
@@ -554,15 +607,16 @@ async function run(){
   if(isChat){
     status.textContent="聊天中…";
     try{
-      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory})});
+      const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,chatMode:true,history:chatHistory,webSearch:webSearch.checked,routing:selectedRouting()})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
       if(d.debug)addCard("card","🔧 除錯訊息",d.debug);
       addCard("a",d.labels?.a||"AI A",d.a);
       addCard("b",d.labels?.b||"AI B",d.b);
       chatHistory.push({who:"you",text:question},{who:"a",text:d.a},{who:"b",text:d.b});
-      if(chatHistory.length>12)chatHistory=chatHistory.slice(-12);
-      status.textContent=`完成 · ${d.version}`;
+      if(chatHistory.length>18)chatHistory=chatHistory.slice(-18);
+      if(webSearch.checked)addCard("card","搜尋來源",searchLabel(d.search));
+      status.textContent=d.partial?"主答完成 · 複核暫時不可用":`完成 · ${d.version}`;
     }catch(e){
       addCard("err","聊天失敗",e.message);status.textContent="失敗";
     }finally{send.disabled=false}
@@ -574,7 +628,7 @@ async function run(){
     const files=buildPayloadFiles();
     const images=await buildPayloadImages();
     status.textContent=`工程會議中 · ${files.length} 檔 + ${images.length} 圖…`;
-    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images})});
+    const r=await fetch("/debate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,webSearch:webSearch.checked,files,images,routing:selectedRouting()})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
 
@@ -600,7 +654,8 @@ function submitEngineering(e){
   e?.stopPropagation?.();
   if(runBusy)return;
   runBusy=true;
-  Promise.resolve(run()).finally(()=>{runBusy=false});
+  const controls=[primaryProvider,backupProvider,swapProviders,$("#clear")];controls.forEach(el=>el.disabled=true);
+  Promise.resolve(run()).finally(()=>{runBusy=false;controls.forEach(el=>el.disabled=false)});
 }
 composerForm.addEventListener("submit",submitEngineering);
 send.addEventListener("click",submitEngineering);
@@ -630,6 +685,7 @@ q.addEventListener("focus",()=>{bgScrollY=window.scrollY;});
 q.addEventListener("blur",()=>{window.scrollTo(0,bgScrollY);});
 
 renderFiles();
+loadModelConfig();
 </script>
 </body>
 </html>
