@@ -1,7 +1,7 @@
 /**
  * worker.js — AI 圓桌的進入點程式（Workers with Static Assets 架構）
  */
-import { onRequestPost as debateHandler } from "./debate.js";
+import { onRequestPost as debateHandler, councilModelConfig } from "./debate.js";
 import { onRequestGet as usageHandler } from "./usage.js";
 import { runSelfReview } from "./selfReview.js";
 import { handleGitHubEngineering, handleGitHubRepos } from "./githubEngineering.js";
@@ -82,6 +82,10 @@ async function handleSelfReviewRequest(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/models" && request.method === "GET") {
+      return json(await councilModelConfig(env));
+    }
 
     if (url.pathname === "/debate" && request.method === "POST") {
       return debateHandler({ request, env, ctx });
