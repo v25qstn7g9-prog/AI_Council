@@ -892,7 +892,7 @@ export function classifyGitHubTask(question, {reportMode=false,dryRun=false}={})
   const text=String(question||"");
   // 英文關鍵字必須加單詞邊界，否則像 "address"、"additional" 這類詞
   // 裡藏的 "add" 會被誤判成修改請求，導致純分析／報告任務被導向修改流程。
-  const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|\bcommit\b|pull request|draft pr|\bfix\b|\bchange\b|\brefactor\b|\bdelete\b|\bremove\b|\badd\b|\breplace\b/i.test(text);
+  const modificationRequested=/修改|修正|修復|改程式|重構|刪除|移除|新增|增加|替換|提升|優化|美化|改善|調整|升級|強化|整理|排版|介面優化|\bcommit\b|pull request|draft pr|\bfix\b|\bchange\b|\brefactor\b|\bdelete\b|\bremove\b|\badd\b|\breplace\b|\bimprove\b|\boptimi[sz]e\b|\bpolish\b|\bupgrade\b/i.test(text);
   const reportRequested=modificationRequested || reportMode===true || /完整報告|詳細報告|產生報告|生成報告|察核|查核|稽核|審核|審查|檢查|分析|報告|review|audit|full report/i.test(text);
   const analysisOnly=dryRun===true || (reportRequested&&!modificationRequested);
   return {modificationRequested,reportRequested,analysisOnly};
@@ -1024,6 +1024,20 @@ export async function runGitHubEngineering(env, { repoFullName, base, task, dryR
   },question,reportRequested);
 }
 
+function publicEngineeringError(error) {
+  const message = String(error?.message || "").trim();
+  if (error?.status === 413) return "請求內容太大";
+  if (error?.status === 400) return "請求格式錯誤";
+  if (!message) return "工程流程暫時失敗，請稍後再試";
+  if (/GITHUB_TOKEN/.test(message)) return "GitHub 尚未完成設定";
+  if (/GitHub (API )?(連線|權限|repository|發生|拒絕|暫時)|Token 驗證|速率限制/.test(message)) return message.slice(0, 220);
+  if (/repository 太大|tree 被截斷|找不到可供 AI 審查|base branch|允許清單/.test(message)) return message.slice(0, 220);
+  if (/AI|Gemini|Cloudflare|Workers|provider|model|quota|rate.?limit|timeout|逾時|Empty|審核|驗證|Gate/i.test(message)) {
+    return `GitHub 原始碼讀取後，AI 審核／驗證階段失敗：${message.slice(0, 180)}`;
+  }
+  return `工程流程失敗：${message.slice(0, 200)}`;
+}
+
 export async function handleGitHubEngineering(request, env) {
   try {
     const body = await readJsonBody(request);
@@ -1040,7 +1054,7 @@ export async function handleGitHubEngineering(request, env) {
     console.error("GitHub 工程模式失敗：", e?.message || e);
     return json({
       ok: false,
-      error: e?.status === 413 ? "請求內容太大" : e?.status === 400 ? "請求格式錯誤" : String(e?.message || "").includes("GITHUB_TOKEN") ? "GitHub 尚未完成設定" : "GitHub 工程模式執行失敗，請稍後再試",
+      error: publicEngineeringError(e),
     }, e?.status === 413 ? 413 : e?.status === 400 ? 400 : 500);
   }
 }
