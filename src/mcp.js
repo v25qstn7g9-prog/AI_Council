@@ -54,6 +54,10 @@ const TOOLS = [
           type: "boolean",
           description: "是否讓圓桌先做網路搜尋再討論（需要 TAVILY_API_KEY，未設定時會自動略過）。預設 false。",
         },
+        maxRounds: {
+          type: "integer",
+          description: "最多討論幾輪（例如小實驗只想看幾輪就好）。不帶就用伺服器預設的安全上限（15 輪）；帶了也不會超過這個安全上限。",
+        },
       },
       required: ["question"],
     },
@@ -186,6 +190,7 @@ async function callDebateStartTool(env, ctx, origin, args) {
     rawImages: [],
     webSearch,
     participants: chosen,
+    maxRounds: args?.maxRounds,
     onProgress: updateProgress,
   }).catch((error) => {
     const message = String(error?.message || error || "未知錯誤").slice(0, 500);
