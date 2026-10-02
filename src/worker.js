@@ -115,6 +115,12 @@ export default {
       return handleGitHubEngineering(request, env);
     }
 
+    if (url.pathname === "/mcp" && request.method === "GET") {
+      return json({ error: "MCP endpoint. Use POST with an OAuth bearer token." }, 401, {
+        "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+      });
+    }
+
     if (url.pathname === "/mcp" && request.method === "POST") {
       return handleMcpRequest(request, env);
     }
