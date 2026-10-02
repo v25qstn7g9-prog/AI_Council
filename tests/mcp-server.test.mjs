@@ -63,10 +63,9 @@ test('initialize and tools/list succeed with a valid issued token', async () => 
   assert.equal(init.result.serverInfo.name, 'ai-council-mcp');
 
   const list = await (await handleMcpRequest(rpc('tools/list', {})(token), env, fakeCtx)).json();
-  assert.equal(list.result.tools.length, 2);
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
-    ['ai_council_debate_start', 'ai_council_debate_result']
+    ['ai_council_debate_start', 'ai_council_debate_result', 'ai_chatroom_start', 'ai_chatroom_stop', 'ai_chatroom_status']
   );
   assert.equal(list.result.tools[0].inputSchema.required[0], 'question');
   assert.equal(list.result.tools[1].inputSchema.required[0], 'sessionId');

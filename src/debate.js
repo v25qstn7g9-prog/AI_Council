@@ -1559,6 +1559,32 @@ ${others}
   };
 }
 
+const CHAT_MAX_TOKENS = 220;
+const CHAT_TEMPERATURE = 0.9;
+
+/**
+ * generateChatMessage — 聊天室模式（src/chatroom.js）用：讓某一個 AI 根據最近聊天紀錄，
+ * 輕鬆回一句話。跟圓桌討論是完全不同的用途，所以故意用小 max_tokens／高 temperature，
+ * 讓它像閒聊而不是長篇大論；provider 本身也已經在 wrangler.jsonc 設成最輕量的模型
+ * （OPENAI_MODEL=gpt-4.1-nano、ANTHROPIC_MODEL=claude-haiku-4-5 等）。
+ */
+export async function generateChatMessage({ env, provider, label, recentLog }) {
+  const historyText = Array.isArray(recentLog) && recentLog.length
+    ? recentLog.map((m) => `${m.label}：${m.text}`).join("\n")
+    : "（目前還沒有人說話，你是第一個開口的）";
+  const messages = [
+    {
+      role: "system",
+      content: `你是群聊室裡的一個成員，暱稱「${label}」。這是一群不同公司 AI 的輕鬆閒聊群組，氣氛像朋友的 LINE 群／Threads，不是在開會或解決問題。用繁體中文，口語、簡短（1~3 句話），可以聊天氣、時事閒聊、互相調侃、分享想法、接前面的話題或開新話題都可以，不用給建議、不用解決問題、不用簽名、不用加表情符號堆疊。`,
+    },
+    {
+      role: "user",
+      content: `【最近的聊天紀錄】\n${historyText}\n\n換你說一句話，自然一點，不用重複自我介紹。`,
+    },
+  ];
+  return askProvider(env.AI, env, provider, messages, CHAT_MAX_TOKENS, CHAT_TEMPERATURE, provider.toUpperCase());
+}
+
 export async function onRequestPost(context) {
   try {
     const { request } = context;
