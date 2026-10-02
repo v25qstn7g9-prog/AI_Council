@@ -17,9 +17,9 @@
  * Spec: https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
  */
 
-import { runRoundtableCouncil, resolveParticipants } from "./debate.js";
+import { prepareRoundtable, runPreparedRoundtable } from "./debate.js";
 import { verifyAccessToken, unauthorizedMcpResponse } from "./oauth.js";
-import { createProgressSession, getProgress, makeProgressUpdater, markProgressError } from "./progress.js";
+import { createProgressSession, getProgress, makeProgressUpdater, markProgressError, addActiveRoundtable, removeActiveRoundtable } from "./progress.js";
 import { startChatroom, stopChatroom, getChatState, getChatLog } from "./chatroom.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
@@ -163,25 +163,25 @@ async function callDebateStartTool(env, ctx, origin, args) {
   if (!question) throw new Error("question 不能是空的");
   const webSearch = args?.webSearch === true;
 
-  const participants = await resolveParticipants(env, args?.providers);
-  const chosen = participants.map((p) => p.id);
-
-  const sessionId = await createProgressSession(env, { question, participants });
-  const updateProgress = makeProgressUpdater(env, sessionId);
-
-  const run = runRoundtableCouncil({
-    env,
-    question,
-    rawFiles: [],
-    rawImages: [],
-    webSearch,
-    participants: chosen,
-    maxRounds: args?.maxRounds,
-    onProgress: updateProgress,
-  }).catch((error) => {
-    const message = String(error?.message || error || "未知錯誤").slice(0, 500);
-    return markProgressError(env, sessionId, message);
+  const prepared = await prepareRoundtable({
+    env, question, rawFiles: [], rawImages: [], webSearch, participants: args?.providers, maxRounds: args?.maxRounds,
   });
+  const participants = prepared.chosen.map((id) => ({ id, label: prepared.labels[id] }));
+
+  const sessionId = await createProgressSession(env, {
+    question,
+    participants,
+    meta: { chosen: prepared.chosen, labels: prepared.labels, baseBrief: prepared.baseBrief, effectiveMaxRounds: prepared.effectiveMaxRounds },
+  });
+  const updateProgress = makeProgressUpdater(env, sessionId);
+  await addActiveRoundtable(env, sessionId);
+
+  const run = runPreparedRoundtable({ env, prepared, onProgress: updateProgress })
+    .catch((error) => {
+      const message = String(error?.message || error || "未知錯誤").slice(0, 500);
+      return markProgressError(env, sessionId, message);
+    })
+    .finally(() => removeActiveRoundtable(env, sessionId));
 
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(run);
