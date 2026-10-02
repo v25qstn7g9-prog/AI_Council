@@ -14,6 +14,8 @@ import {
   handleToken,
 } from "./oauth.js";
 import { handleWatchPage, handleProgressApi, sessionIdFromPath } from "./watch.js";
+import { handleChatroomPage, handleChatroomLogApi } from "./chatroom-view.js";
+import { runChatTick } from "./chatroom.js";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -136,6 +138,14 @@ export default {
       return handleProgressApi(request, env, sessionId);
     }
 
+    if (url.pathname === "/chatroom" && request.method === "GET") {
+      return handleChatroomPage();
+    }
+
+    if (url.pathname === "/chatroom/log" && request.method === "GET") {
+      return handleChatroomLogApi(request, env);
+    }
+
     if (
       (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-authorization-server") &&
       request.method === "GET"
@@ -163,6 +173,17 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    // 同一個 scheduled() 掛兩種排程，用 event.cron 分流：
+    //   "0 3 * * 1"   → 每週自我健檢
+    //   "*/2 * * * *" → 聊天室 tick（聊天室沒開著的話，runChatTick 只是一次便宜的 KV 讀取）
+    if (event.cron === "*/2 * * * *") {
+      ctx.waitUntil(
+        runChatTick(env).catch((e) => {
+          console.error("AI 圓桌聊天室 tick 失敗：", e?.message || e);
+        })
+      );
+      return;
+    }
     ctx.waitUntil(
       runSelfReview(env).catch((e) => {
         console.error("AI 圓桌自我健檢（排程）失敗：", e?.message || e);

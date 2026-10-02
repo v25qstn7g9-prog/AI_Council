@@ -20,6 +20,7 @@
 import { runRoundtableCouncil, councilModelConfig } from "./debate.js";
 import { verifyAccessToken, unauthorizedMcpResponse } from "./oauth.js";
 import { createProgressSession, getProgress, makeProgressUpdater, markProgressError } from "./progress.js";
+import { startChatroom, stopChatroom, getChatState, getChatLog } from "./chatroom.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_INFO = { name: "ai-council-mcp", version: "2.0.0" };
@@ -73,6 +74,35 @@ const TOOLS = [
       },
       required: ["sessionId"],
     },
+  },
+  {
+    name: "ai_chatroom_start",
+    description:
+      "開啟聊天模式：最多 4 個 AI（cloudflare / openai / anthropic / gemini，可自由選放不放，至少 2 個）" +
+      "在背景隨意閒聊，氣氛像朋友的 LINE 群／Threads，不是在討論正事、不會有結論。" +
+      "每隔約 2 分鐘才會有一個人講一句話（用輕量模型、短回覆，刻意壓低成本），會一直聊到呼叫 ai_chatroom_stop" +
+      "（Johnny 喊「休息」的時候用這個）為止，有一個安全上限（聊滿 300 則自動暫停，避免忘記喊停一直燒）。" +
+      "這個工具立刻回傳一個 /chatroom 網址，可以分享給使用者打開看大家聊天。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        providers: {
+          type: "array",
+          items: { type: "string", enum: ["cloudflare", "openai", "anthropic", "gemini"] },
+          description: "要放進聊天室的 AI，至少 2 個。不帶這個參數就預設放所有目前可用的 AI。",
+        },
+      },
+    },
+  },
+  {
+    name: "ai_chatroom_stop",
+    description: "讓正在聊天模式的 AI 們休息、停止繼續聊天。Johnny 說「休息」「夠了」「先停」這類話的時候呼叫這個。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "ai_chatroom_status",
+    description: "查目前聊天室是開著還是休息中、聊了幾則、最近幾句話在聊什麼，不用打開網頁也能知道現況。",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 
@@ -195,6 +225,38 @@ async function callDebateResultTool(env, args) {
   return textToolResult(summarizeRunning(progress));
 }
 
+async function callChatroomStartTool(env, origin, args) {
+  const participants = await startChatroom(env, { participants: args?.providers });
+  const watchUrl = `${origin}/chatroom`;
+  return textToolResult(
+    `聊天室開了，這次放了 ${participants.participants.map((p) => p.label).join("、")}。\n` +
+      `即時畫面：${watchUrl}\n` +
+      `每隔約 2 分鐘會有人講一句話，會一直聊到你喊休息（呼叫 ai_chatroom_stop）為止，聊滿 300 則會自動暫停。`
+  );
+}
+
+async function callChatroomStopTool(env) {
+  const state = await stopChatroom(env, "user_requested");
+  if (!state) return textToolResult("聊天室本來就沒開著。");
+  return textToolResult(`好，聊天室休息了（這次一共聊了 ${state.messageCount} 則）。`);
+}
+
+async function callChatroomStatusTool(env) {
+  const state = await getChatState(env);
+  if (!state) return textToolResult("聊天室還沒開過。");
+  const log = await getChatLog(env);
+  const recent = log.filter((m) => m.id !== "system").slice(-6);
+  const lines = [
+    state.enabled
+      ? `🟢 聊天中（${state.participants.map((p) => p.label).join("、")}），已經 ${state.messageCount} 則`
+      : `🔴 休息中${state.stoppedReason ? `（${state.stoppedReason}）` : ""}，總共聊了 ${state.messageCount} 則`,
+  ];
+  if (recent.length) {
+    lines.push("\n最近幾句：\n" + recent.map((m) => `${m.label}：${m.text}`).join("\n"));
+  }
+  return textToolResult(lines.join("\n"));
+}
+
 export async function handleMcpRequest(request, env, ctx) {
   if (request.method !== "POST") {
     return jsonResponse(rpcError(null, -32600, "只接受 POST"), 405);
@@ -244,6 +306,18 @@ export async function handleMcpRequest(request, env, ctx) {
       }
       if (toolName === "ai_council_debate_result") {
         const toolResult = await callDebateResultTool(env, params?.arguments || {});
+        return jsonResponse(rpcResult(id, toolResult));
+      }
+      if (toolName === "ai_chatroom_start") {
+        const toolResult = await callChatroomStartTool(env, origin, params?.arguments || {});
+        return jsonResponse(rpcResult(id, toolResult));
+      }
+      if (toolName === "ai_chatroom_stop") {
+        const toolResult = await callChatroomStopTool(env);
+        return jsonResponse(rpcResult(id, toolResult));
+      }
+      if (toolName === "ai_chatroom_status") {
+        const toolResult = await callChatroomStatusTool(env);
         return jsonResponse(rpcResult(id, toolResult));
       }
       return jsonResponse(rpcError(id, -32602, `未知的工具：${toolName}`), 400);
