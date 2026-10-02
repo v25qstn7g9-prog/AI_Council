@@ -16,6 +16,7 @@ import {
 import { handleWatchPage, handleProgressApi, sessionIdFromPath } from "./watch.js";
 import { handleChatroomPage, handleChatroomLogApi } from "./chatroom-view.js";
 import { runChatTick } from "./chatroom.js";
+import { handleRoundtableStart } from "./roundtable-start.js";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -126,6 +127,10 @@ export default {
 
     if (url.pathname === "/mcp" && request.method === "POST") {
       return handleMcpRequest(request, env, ctx);
+    }
+
+    if (url.pathname === "/roundtable/start" && request.method === "POST") {
+      return handleRoundtableStart(request, env, ctx);
     }
 
     if (url.pathname.startsWith("/watch/") && request.method === "GET") {

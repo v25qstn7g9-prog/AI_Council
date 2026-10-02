@@ -26,7 +26,8 @@
       "/watch/*",
       "/progress/*",
       "/chatroom",
-      "/chatroom/*"
+      "/chatroom/*",
+      "/roundtable/start"
     ]
   },
 

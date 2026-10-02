@@ -17,14 +17,13 @@
  * Spec: https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
  */
 
-import { runRoundtableCouncil, councilModelConfig } from "./debate.js";
+import { runRoundtableCouncil, resolveParticipants } from "./debate.js";
 import { verifyAccessToken, unauthorizedMcpResponse } from "./oauth.js";
 import { createProgressSession, getProgress, makeProgressUpdater, markProgressError } from "./progress.js";
 import { startChatroom, stopChatroom, getChatState, getChatLog } from "./chatroom.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_INFO = { name: "ai-council-mcp", version: "2.0.0" };
-const PROVIDER_LABELS = { cloudflare: "Cloudflare", openai: "OpenAI", anthropic: "Claude", gemini: "Gemini" };
 
 const TOOLS = [
   {
@@ -164,21 +163,8 @@ async function callDebateStartTool(env, ctx, origin, args) {
   if (!question) throw new Error("question 不能是空的");
   const webSearch = args?.webSearch === true;
 
-  const config = await councilModelConfig(env);
-  const availableIds = new Set(config.providers.filter((p) => p.available).map((p) => p.id));
-  const requestedRaw = Array.isArray(args?.providers) ? args.providers : null;
-  const requested = requestedRaw?.length
-    ? [...new Set(requestedRaw.map((p) => String(p || "").trim().toLowerCase()))]
-    : [...availableIds];
-  const chosen = requested.filter((p) => availableIds.has(p));
-  if (chosen.length < 2) {
-    throw new Error(
-      chosen.length === 0
-        ? "沒有任何可用的 AI（檢查一下 API Key 有沒有設定），至少要放 2 個才能討論"
-        : `只有 ${chosen.length} 個 AI 可用（${chosen.join("、")}），至少要放 2 個才能討論出共識`
-    );
-  }
-  const participants = chosen.map((id) => ({ id, label: PROVIDER_LABELS[id] || id }));
+  const participants = await resolveParticipants(env, args?.providers);
+  const chosen = participants.map((p) => p.id);
 
   const sessionId = await createProgressSession(env, { question, participants });
   const updateProgress = makeProgressUpdater(env, sessionId);
