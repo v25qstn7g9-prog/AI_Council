@@ -78,6 +78,10 @@
   // 這組密碼同時也沿用給 /self-review 以外的其他用途，不設定的話 /authorize 登入頁會直接回 403。
   // OAuth 流程本身的狀態（註冊的 client、一次性 code、核發的 token）都存在上面的
   // council_kv 裡（"oauth:" 開頭的 key），沒有另外建新的 KV。
+  //
+  // /mcp 的 ai_council_debate_start 工具呼叫後會立刻回傳一個 /watch/:sessionId 網址，
+  // 圓桌在背景討論（ctx.waitUntil）、即時進度存在同一個 council_kv 裡（"progress:" 開頭，
+  // 30 分鐘沒查詢就自動過期），打開網址可以看到 A/B/最終結論陸續跑出來，不用等全部跑完。
 
   // ============================================
   // 環境變數
