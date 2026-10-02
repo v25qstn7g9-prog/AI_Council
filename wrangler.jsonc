@@ -62,10 +62,23 @@
   //   GITHUB_BASE_BRANCH  → 要開 PR 進去的分支，通常是 "main"
 
   // ============================================
+  // MCP（選用；讓 Claude 能直接呼叫圓桌開會，不用手動開網頁）
+  // ============================================
+  // 請用 Secret 設定：
+  //   wrangler secret put MCP_TOKEN    → 你自己設一組密碼，Claude 端的連接器要帶這組
+  //                                       （Authorization: Bearer <MCP_TOKEN>）
+  // 不設定的話 /mcp 端點會直接回 403，其他功能不受影響。
+
+  // ============================================
   // 環境變數
   // ============================================
   // COUNCIL_RATE_LIMIT：格式 "次數:秒數"，"30:1800" = 30 分鐘內 30 次
   // COUNCIL_ENABLED：設 "false" 可臨時休會（例如 AI 額度快用完時）
+  // COUNCIL_A/B/C_PROVIDER：預設都是 "cloudflare"（免費 Workers AI 額度），
+  //   /mcp 這個 MCP 工具固定用這組伺服器預設值，不會因為網頁上選了 Claude/OpenAI 就跟著變貴。
+  //   想讓圓桌真的用 OpenAI／Claude 測試時，才把對應的值改成 "openai" 或 "anthropic"。
+  // OPENAI_MODEL / ANTHROPIC_MODEL：沒設定時預設用 gpt-4.1-mini／claude-sonnet-4-5（較貴）；
+  //   這裡先設成最輕量的版本，省測試費用，之後要測正式效果再改回去就好。
   "vars": {
     "COUNCIL_RATE_LIMIT": "30:1800",
     "COUNCIL_ENABLED": "true",
@@ -74,6 +87,8 @@
     "COUNCIL_B_PROVIDER": "cloudflare",
     "COUNCIL_C_PROVIDER": "cloudflare",
     "GEMINI_MODEL": "gemini-3.5-flash",
+    "OPENAI_MODEL": "gpt-4.1-nano",
+    "ANTHROPIC_MODEL": "claude-haiku-4-5-20251001",
     "GITHUB_OWNER": "v25qstn7g9-prog",
     "GITHUB_REPO": "AI_Council",
     "GITHUB_BASE_BRANCH": "main",

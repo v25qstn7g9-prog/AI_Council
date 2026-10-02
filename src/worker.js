@@ -5,6 +5,7 @@ import { onRequestPost as debateHandler, councilModelConfig } from "./debate.js"
 import { onRequestGet as usageHandler } from "./usage.js";
 import { runSelfReview } from "./selfReview.js";
 import { handleGitHubEngineering, handleGitHubRepos } from "./githubEngineering.js";
+import { handleMcpRequest } from "./mcp.js";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -105,6 +106,10 @@ export default {
 
     if (url.pathname === "/github/engineering" && request.method === "POST") {
       return handleGitHubEngineering(request, env);
+    }
+
+    if (url.pathname === "/mcp" && request.method === "POST") {
+      return handleMcpRequest(request, env);
     }
 
     return env.ASSETS.fetch(request);
