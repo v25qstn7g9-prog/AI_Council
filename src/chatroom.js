@@ -13,7 +13,7 @@
  *   chatroom:log   → 單一 JSON 陣列（最近訊息，超過上限就從舊的開始丟）
  */
 
-import { generateChatMessage, councilModelConfig } from "./debate.js";
+import { generateChatMessage, resolveParticipants } from "./debate.js";
 
 const STATE_KEY = "chatroom:state";
 const LOG_KEY = "chatroom:log";
@@ -21,7 +21,6 @@ const STORE_TTL_SECONDS = 60 * 60 * 24 * 14; // 2 週；每次寫入都會刷新
 const CHAT_LOG_MAX = 200;
 const CHAT_SAFETY_MAX_MESSAGES = 300; // 不是「目標則數」，純粹防止忘記喊休息時一直燒下去
 const CHAT_MAX_CONSECUTIVE_FAILURES = 5;
-const PROVIDER_LABELS = { cloudflare: "Cloudflare", openai: "OpenAI", anthropic: "Claude", gemini: "Gemini" };
 
 function sanitizeInternalError(value) {
   const s = String(value?.message || value || "").replace(/[\r\n]+/g, " ").trim();
@@ -63,20 +62,7 @@ async function appendSystemLine(env, text) {
  * 邏輯跟 runRoundtableCouncil 的參與者驗證一致：至少要放 2 個。
  */
 export async function startChatroom(env, { participants }) {
-  const config = await councilModelConfig(env);
-  const availableIds = new Set(config.providers.filter((p) => p.available).map((p) => p.id));
-  const requested = Array.isArray(participants) && participants.length
-    ? [...new Set(participants.map((p) => String(p || "").trim().toLowerCase()))]
-    : [...availableIds];
-  const chosen = requested.filter((p) => availableIds.has(p));
-  if (chosen.length < 2) {
-    throw new Error(
-      chosen.length === 0
-        ? "沒有任何可用的 AI（檢查一下 API Key 有沒有設定），至少要放 2 個才能聊天"
-        : `只有 ${chosen.length} 個 AI 可用（${chosen.join("、")}），至少要放 2 個才能聊天`
-    );
-  }
-  const participantRecords = chosen.map((id) => ({ id, label: PROVIDER_LABELS[id] || id }));
+  const participantRecords = await resolveParticipants(env, participants);
 
   const state = {
     enabled: true,

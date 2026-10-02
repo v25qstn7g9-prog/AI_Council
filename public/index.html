@@ -81,6 +81,25 @@ footer{background:linear-gradient(transparent,#0b101a 18%);padding-top:20px;z-in
 </div>
 <div id="routeState" class="small" role="status">讀取已設定的 AI 服務…</div>
 </section>
+
+<section class="panel" aria-label="4 AI 平等圓桌">
+<div class="row"><div class="who">🔄 4 AI 平等圓桌（新）</div><span class="badge">討論到全員同意才結案</span></div>
+<div class="small" style="margin:6px 0 10px">勾選要放進來的 AI（至少 2 個，地位平等，沒有主審/複審之分），用下面的問題欄位送出，會開一個新分頁即時監看討論過程，一輪一輪跑到大家都同意同一個版本為止。</div>
+<div id="roundtableProviders" class="row" style="gap:14px;justify-content:flex-start;flex-wrap:wrap">
+  <label class="toggleWrap"><input type="checkbox" class="rtProvider" value="cloudflare" checked> Cloudflare</label>
+  <label class="toggleWrap"><input type="checkbox" class="rtProvider" value="openai" checked> OpenAI</label>
+  <label class="toggleWrap"><input type="checkbox" class="rtProvider" value="anthropic" checked> Claude</label>
+  <label class="toggleWrap"><input type="checkbox" class="rtProvider" value="gemini" checked> Gemini</label>
+</div>
+<div class="row" style="margin-top:10px;gap:10px">
+  <label class="small" style="display:flex;align-items:center;gap:6px">最多幾輪
+    <input id="rtMaxRounds" type="text" inputmode="numeric" placeholder="預設 15（安全上限）" style="width:120px">
+  </label>
+  <button id="rtStart" type="button" class="secondary">開始圓桌討論</button>
+</div>
+<div id="rtState" class="small" style="margin-top:7px"></div>
+</section>
+
 <details class="workspace-settings"><summary>附件與工作模式 · 搜尋 / 對話 / GitHub</summary>
 <div class="panel">
 <div class="who">專案附件</div>
@@ -178,6 +197,12 @@ async function loadModelConfig(){
     for(const select of [primaryProvider,backupProvider])for(const provider of data.providers){const option=document.createElement("option");option.value=provider.id;option.textContent=provider.name+(provider.available?"":" · 未設定");option.disabled=!provider.available;select.append(option);}
     try{const saved=JSON.parse(localStorage.getItem("council.routing")||"null");for(const [key,select] of [["primary",primaryProvider],["backup",backupProvider]])if(saved?.[key]==="auto"||data.providers.some(p=>p.id===saved?.[key]&&p.available))select.value=saved[key];}catch{}
     routeState.textContent=data.providers.filter(p=>p.available).map(p=>`${p.name} · ${p.model}`).join(" ／ ")||"尚無可用服務，請先設定伺服器金鑰。";
+    for(const cb of document.querySelectorAll(".rtProvider")){
+      const provider=data.providers.find(p=>p.id===cb.value);
+      cb.checked=Boolean(provider?.available);
+      cb.disabled=!provider?.available;
+      cb.closest("label").title=provider?.available?"":"伺服器尚未設定這個 AI 的金鑰";
+    }
   }catch{routeState.textContent="暫時無法讀取服務設定，送出時沿用伺服器預設。";}
 }
 primaryProvider.onchange=backupProvider.onchange=saveRouting;
@@ -682,6 +707,31 @@ q.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){
     e.preventDefault();
     submitEngineering(e);
+  }
+});
+
+const rtStart=$("#rtStart"),rtState=$("#rtState"),rtMaxRounds=$("#rtMaxRounds");
+rtStart.addEventListener("click",async()=>{
+  const question=q.value.trim();
+  if(!question){rtState.textContent="請先在下面輸入框打字要討論的問題。";rtState.className="badge err";return;}
+  const providers=[...document.querySelectorAll(".rtProvider")].filter(cb=>cb.checked&&!cb.disabled).map(cb=>cb.value);
+  if(providers.length<2){rtState.textContent="至少要勾選 2 個可用的 AI 才能討論。";rtState.className="badge err";return;}
+  const maxRoundsRaw=rtMaxRounds.value.trim();
+  const maxRounds=maxRoundsRaw?Number(maxRoundsRaw):undefined;
+  rtStart.disabled=true;
+  rtState.textContent="開始中…";
+  rtState.className="small";
+  try{
+    const r=await fetch("/roundtable/start",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({question,providers,webSearch:webSearch.checked,...(maxRounds?{maxRounds}:{})})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw Error(d.error||`HTTP ${r.status}`);
+    rtState.textContent=`圓桌開始了（${providers.join("、")}），正在開新分頁監看…`;
+    window.open(d.watchUrl,"_blank","noopener");
+  }catch(e){
+    rtState.textContent="開始失敗："+String(e.message||e);
+    rtState.className="small";
+  }finally{
+    rtStart.disabled=false;
   }
 });
 
