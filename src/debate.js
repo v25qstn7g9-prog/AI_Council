@@ -1403,7 +1403,12 @@ function roundtableAgreementTag(text) {
  * 這個函式取代的是「互動討論」這條路（目前接在 MCP 的 ai_council_debate_start），
  * GitHub 自我健檢 / Audit 那條自動化管線仍然用原本的三人制，沒有被這次異動影響。
  */
-export async function runRoundtableCouncil({ env, question, rawFiles, rawImages, webSearch, participants, onProgress }) {
+export async function runRoundtableCouncil({ env, question, rawFiles, rawImages, webSearch, participants, maxRounds, onProgress }) {
+  // 呼叫端可以自己設上限（例如小實驗只想跑幾輪），但不能超過安全上限，也不能小於 1。
+  const effectiveMaxRounds = Math.min(
+    ROUNDTABLE_SAFETY_MAX_ROUNDS,
+    Math.max(1, Number.isFinite(Number(maxRounds)) && Number(maxRounds) > 0 ? Math.floor(Number(maxRounds)) : ROUNDTABLE_SAFETY_MAX_ROUNDS)
+  );
   const emitProgress = async (payload) => {
     if (typeof onProgress !== "function") return;
     try {
@@ -1454,7 +1459,7 @@ ${searchNote}
   let consensus = false;
   let round = 0;
 
-  while (round < ROUNDTABLE_SAFETY_MAX_ROUNDS && !consensus) {
+  while (round < effectiveMaxRounds && !consensus) {
     round += 1;
     const isFirstRound = round === 1;
 
@@ -1528,14 +1533,14 @@ ${others}
     }
   }
 
-  const hitSafetyCap = !consensus && round >= ROUNDTABLE_SAFETY_MAX_ROUNDS;
+  const hitSafetyCap = !consensus && round >= effectiveMaxRounds;
 
   // 挑一份代表性的最終文字：共識輪裡大家都同意，內容理論上等價，選最長的那份通常最完整。
   const okEntries = entries.filter((e) => e.status === "ok");
   const finalEntry = okEntries.reduce((best, cur) => (!best || cur.text.length > best.text.length ? cur : best), null);
   let finalText = finalEntry ? finalEntry.text.replace(/^狀態[：:]\s*同意\s*/i, "").trim() : "（沒有可用的結論）";
   if (hitSafetyCap) {
-    finalText += `\n\n⚠️ 已經討論滿 ${ROUNDTABLE_SAFETY_MAX_ROUNDS} 輪（安全上限，不是目標輪數）仍未全員明確表態同意，以上是最後一輪內容最完整的版本，請自行判斷是否需要再手動追問。`;
+    finalText += `\n\n⚠️ 已經討論滿 ${effectiveMaxRounds} 輪上限仍未全員明確表態同意，以上是最後一輪內容最完整的版本，請自行判斷是否需要再手動追問。`;
   }
 
   return {
