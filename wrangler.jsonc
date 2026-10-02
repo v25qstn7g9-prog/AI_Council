@@ -64,10 +64,14 @@
   // ============================================
   // MCP（選用；讓 Claude 能直接呼叫圓桌開會，不用手動開網頁）
   // ============================================
+  // /mcp 端點走正規 OAuth 登入流程（Claude 連接器會自己跳出登入頁，不是貼 token 那種介面）。
   // 請用 Secret 設定：
-  //   wrangler secret put MCP_TOKEN    → 你自己設一組密碼，Claude 端的連接器要帶這組
-  //                                       （Authorization: Bearer <MCP_TOKEN>）
-  // 不設定的話 /mcp 端點會直接回 403，其他功能不受影響。
+  //   wrangler secret put MCP_TOKEN    → 你自己設一組密碼，之後 Claude 第一次連線跳出的
+  //                                       登入頁，就是輸入這組密碼來「登入」；登入成功後
+  //                                       Claude 會自己保管後續用的 token，不用每次手動貼。
+  // 這組密碼同時也沿用給 /self-review 以外的其他用途，不設定的話 /authorize 登入頁會直接回 403。
+  // OAuth 流程本身的狀態（註冊的 client、一次性 code、核發的 token）都存在上面的
+  // council_kv 裡（"oauth:" 開頭的 key），沒有另外建新的 KV。
 
   // ============================================
   // 環境變數

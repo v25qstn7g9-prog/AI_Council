@@ -12,6 +12,7 @@
  */
 
 import { runEngineeringCouncil } from "./debate.js";
+import { verifyAccessToken, unauthorizedMcpResponse } from "./oauth.js";
 
 const PROTOCOL_VERSION = "2025-03-26";
 const SERVER_INFO = { name: "ai-council-mcp", version: "1.0.0" };
@@ -55,47 +56,6 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-async function readSecret(env, name) {
-  let value = env?.[name];
-  try {
-    if (value && typeof value.get === "function") value = await value.get();
-  } catch {
-    return "";
-  }
-  return String(value || "").trim();
-}
-
-/**
- * 常數時間比對，防範 timing attack（跟 worker.js 的 self-review 驗證同一招）。
- */
-async function safeCompare(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const encoder = new TextEncoder();
-  const [aHash, bHash] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(a)),
-    crypto.subtle.digest("SHA-256", encoder.encode(b)),
-  ]);
-  const left = new Uint8Array(aHash);
-  const right = new Uint8Array(bHash);
-  let difference = 0;
-  for (let i = 0; i < left.length; i += 1) difference |= left[i] ^ right[i];
-  return difference === 0;
-}
-
-export async function checkMcpAuth(request, env) {
-  const configuredToken = await readSecret(env, "MCP_TOKEN");
-  if (!configuredToken) {
-    return { ok: false, status: 403, message: "尚未設定 MCP_TOKEN，MCP 端點已停用" };
-  }
-  const header = request.headers.get("authorization") || "";
-  const given = header.replace(/^Bearer\s+/i, "").trim();
-  const isValid = await safeCompare(given, configuredToken);
-  if (!isValid) {
-    return { ok: false, status: 401, message: "token 不正確" };
-  }
-  return { ok: true };
-}
-
 function summarizeCouncilResult(result) {
   const labels = result?.labels || {};
   const lines = [
@@ -130,8 +90,11 @@ export async function handleMcpRequest(request, env) {
     return jsonResponse(rpcError(null, -32600, "只接受 POST"), 405);
   }
 
-  const auth = await checkMcpAuth(request, env);
-  if (!auth.ok) return jsonResponse(rpcError(null, -32000, auth.message), auth.status);
+  const auth = await verifyAccessToken(request, env);
+  if (!auth.ok) {
+    const origin = new URL(request.url).origin;
+    return unauthorizedMcpResponse(origin);
+  }
 
   let body;
   try {

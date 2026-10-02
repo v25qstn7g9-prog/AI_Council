@@ -6,6 +6,13 @@ import { onRequestGet as usageHandler } from "./usage.js";
 import { runSelfReview } from "./selfReview.js";
 import { handleGitHubEngineering, handleGitHubRepos } from "./githubEngineering.js";
 import { handleMcpRequest } from "./mcp.js";
+import {
+  handleOAuthWellKnown,
+  handleClientRegistration,
+  handleAuthorizeGet,
+  handleAuthorizePost,
+  handleToken,
+} from "./oauth.js";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -110,6 +117,29 @@ export default {
 
     if (url.pathname === "/mcp" && request.method === "POST") {
       return handleMcpRequest(request, env);
+    }
+
+    if (
+      (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-authorization-server") &&
+      request.method === "GET"
+    ) {
+      return handleOAuthWellKnown(request, env);
+    }
+
+    if (url.pathname === "/oauth/register" && request.method === "POST") {
+      return handleClientRegistration(request, env);
+    }
+
+    if (url.pathname === "/authorize" && request.method === "GET") {
+      return handleAuthorizeGet(request, env);
+    }
+
+    if (url.pathname === "/authorize" && request.method === "POST") {
+      return handleAuthorizePost(request, env);
+    }
+
+    if (url.pathname === "/oauth/token" && request.method === "POST") {
+      return handleToken(request, env);
     }
 
     return env.ASSETS.fetch(request);
