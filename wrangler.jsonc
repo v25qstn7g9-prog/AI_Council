@@ -27,7 +27,13 @@
       "/progress/*",
       "/chatroom",
       "/chatroom/*",
-      "/roundtable/start"
+      "/roundtable/start",
+      "/models",
+      "/debate",
+      "/usage",
+      "/self-review",
+      "/github/repos",
+      "/github/engineering"
     ]
   },
 

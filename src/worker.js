@@ -17,6 +17,7 @@ import { handleWatchPage, handleProgressApi, sessionIdFromPath } from "./watch.j
 import { handleChatroomPage, handleChatroomLogApi } from "./chatroom-view.js";
 import { runChatTick } from "./chatroom.js";
 import { handleRoundtableStart } from "./roundtable-start.js";
+import { runRoundtableWatchdog } from "./roundtable-watchdog.js";
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -180,11 +181,16 @@ export default {
   async scheduled(event, env, ctx) {
     // 同一個 scheduled() 掛兩種排程，用 event.cron 分流：
     //   "0 3 * * 1"   → 每週自我健檢
-    //   "*/2 * * * *" → 聊天室 tick（聊天室沒開著的話，runChatTick 只是一次便宜的 KV 讀取）
+    //   "*/2 * * * *" → 聊天室 tick + 圓桌 watchdog（兩個都沒事做的話，只是便宜的 KV 讀取）
     if (event.cron === "*/2 * * * *") {
       ctx.waitUntil(
         runChatTick(env).catch((e) => {
           console.error("AI 圓桌聊天室 tick 失敗：", e?.message || e);
+        })
+      );
+      ctx.waitUntil(
+        runRoundtableWatchdog(env).catch((e) => {
+          console.error("AI 圓桌 watchdog 失敗：", e?.message || e);
         })
       );
       return;

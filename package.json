@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "echo 'no build step required'",
-    "test": "node tests/audit-pipeline.test.mjs && node --test tests/provider-routing.test.mjs tests/mcp-server.test.mjs tests/oauth.test.mjs tests/chatroom.test.mjs tests/roundtable-start.test.mjs"
+    "test": "node tests/audit-pipeline.test.mjs && node --test tests/provider-routing.test.mjs tests/mcp-server.test.mjs tests/oauth.test.mjs tests/chatroom.test.mjs tests/roundtable-start.test.mjs tests/roundtable-watchdog.test.mjs tests/search-query.test.mjs"
   },
   "version": "4.9.3"
 }

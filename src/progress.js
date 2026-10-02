@@ -12,6 +12,7 @@
 const PROGRESS_TTL_SECONDS = 60 * 30; // 30 分鐘沒人看就自動過期
 const SESSION_ID_BYTES = 12;
 const MAX_STORED_ROUNDS = 20; // 比安全上限（15 輪）多留一點緩衝
+const ACTIVE_KEY = "roundtable:active"; // 還在跑、watchdog 需要盯著的 sessionId 清單
 
 function base64url(bytes) {
   let str = "";
@@ -29,7 +30,7 @@ function key(sessionId) {
   return `progress:${sessionId}`;
 }
 
-export async function createProgressSession(env, { question, participants }) {
+export async function createProgressSession(env, { question, participants, meta }) {
   const sessionId = newSessionId();
   const record = {
     sessionId,
@@ -41,11 +42,52 @@ export async function createProgressSession(env, { question, participants }) {
     consensus: false,
     final: null,
     error: null,
+    // meta（chosen/labels/baseBrief/effectiveMaxRounds）讓 watchdog 卡住時能接手跑下一輪，
+    // 不用重新搜尋網路或重讀附件。只有 roundtable 會填這個，舊的 engineering council 用不到。
+    meta: meta || null,
     startedAt: Date.now(),
     updatedAt: Date.now(),
   };
   await putProgress(env, sessionId, record);
   return sessionId;
+}
+
+/**
+ * 「還在跑」的圓桌 sessionId 清單，給 roundtable-watchdog.js 用：每次 cron tick 掃一輪，
+ * 看看有沒有哪場討論卡住很久沒動靜，有的話接手跑下一輪。
+ */
+export async function addActiveRoundtable(env, sessionId) {
+  if (!env.council_kv || !sessionId) return;
+  const current = await kvGetActiveList(env);
+  if (!current.includes(sessionId)) {
+    current.push(sessionId);
+    await env.council_kv.put(ACTIVE_KEY, JSON.stringify(current), { expirationTtl: PROGRESS_TTL_SECONDS });
+  }
+}
+
+export async function removeActiveRoundtable(env, sessionId) {
+  if (!env.council_kv || !sessionId) return;
+  const current = await kvGetActiveList(env);
+  const next = current.filter((id) => id !== sessionId);
+  if (next.length !== current.length) {
+    await env.council_kv.put(ACTIVE_KEY, JSON.stringify(next), { expirationTtl: PROGRESS_TTL_SECONDS });
+  }
+}
+
+export async function listActiveRoundtables(env) {
+  return kvGetActiveList(env);
+}
+
+async function kvGetActiveList(env) {
+  if (!env.council_kv) return [];
+  const raw = await env.council_kv.get(ACTIVE_KEY);
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
 }
 
 async function putProgress(env, sessionId, record) {
