@@ -22,7 +22,9 @@
       "/mcp",
       "/.well-known/*",
       "/oauth/*",
-      "/authorize"
+      "/authorize",
+      "/watch/*",
+      "/progress/*"
     ]
   },
 

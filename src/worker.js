@@ -15,10 +15,10 @@ import {
 } from "./oauth.js";
 import { handleWatchPage, handleProgressApi, sessionIdFromPath } from "./watch.js";
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extraHeaders },
   });
 }
 
