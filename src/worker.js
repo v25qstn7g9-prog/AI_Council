@@ -13,11 +13,12 @@ import {
   handleAuthorizePost,
   handleToken,
 } from "./oauth.js";
+import { handleWatchPage, handleProgressApi, sessionIdFromPath } from "./watch.js";
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extraHeaders },
   });
 }
 
@@ -115,8 +116,24 @@ export default {
       return handleGitHubEngineering(request, env);
     }
 
+    if (url.pathname === "/mcp" && request.method === "GET") {
+      return json({ error: "MCP endpoint. Use POST with an OAuth bearer token." }, 401, {
+        "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+      });
+    }
+
     if (url.pathname === "/mcp" && request.method === "POST") {
-      return handleMcpRequest(request, env);
+      return handleMcpRequest(request, env, ctx);
+    }
+
+    if (url.pathname.startsWith("/watch/") && request.method === "GET") {
+      const sessionId = sessionIdFromPath(url.pathname, "/watch/");
+      return handleWatchPage(request, env, sessionId);
+    }
+
+    if (url.pathname.startsWith("/progress/") && request.method === "GET") {
+      const sessionId = sessionIdFromPath(url.pathname, "/progress/");
+      return handleProgressApi(request, env, sessionId);
     }
 
     if (
