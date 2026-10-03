@@ -25,15 +25,18 @@ export async function handleChatroomLogApi(request, env) {
 }
 
 const PAGE = `<!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>AI 圓桌 · 聊天室</title>
 <style>
-body{font-family:system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;background:#0f1320;color:#eee;margin:0;padding:20px}
-.wrap{max-width:640px;margin:0 auto}
-h1{font-size:18px;margin:0 0 4px}
-.status{font-size:13px;color:#9aa;margin-bottom:16px;position:sticky;top:0;background:#0f1320;padding:8px 0}
+html,body{height:100%;margin:0;padding:0;overflow:hidden;touch-action:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;background:#0f1320;color:#eee}
+.wrap{display:flex;flex-direction:column;height:100%;width:100%}
+h1{font-size:18px;margin:0;padding:16px 20px 0;flex:0 0 auto}
+.status{font-size:13px;color:#9aa;margin:0;padding:8px 20px 14px;flex:0 0 auto}
 .status.on{color:#5fd47a}
 .status.off{color:#ff8080}
+#messages{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y;padding:0 20px 20px}
 .bubble-row{display:flex;margin-bottom:10px}
 .bubble-row.system{justify-content:center}
 .bubble{max-width:78%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:#1a1f30}
@@ -73,10 +76,11 @@ async function poll() {
     const res = await fetch('/chatroom/log', { cache: 'no-store' });
     const p = await res.json();
     const log = p.log || [];
+    const messagesEl = document.getElementById('messages');
+    const wasAtBottom = (messagesEl.scrollTop + messagesEl.clientHeight) >= (messagesEl.scrollHeight - 200);
     for (let i = rendered; i < log.length; i++) renderMessage(log[i]);
-    const wasAtBottom = (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 200);
     rendered = log.length;
-    if (wasAtBottom) window.scrollTo(0, document.body.scrollHeight);
+    if (wasAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
 
     const statusEl = document.getElementById('status');
     if (p.enabled) {
