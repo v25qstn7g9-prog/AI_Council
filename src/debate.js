@@ -99,10 +99,14 @@ async function askGemini(env, apiKey, messages, maxTokens = 1200, temperature = 
   // 最終整合輸出是「JSON 摘要 + FILE 區塊」的混合格式，
   // 不可要求 Gemini 強制輸出 application/json，否則 FILE 區塊可能被截掉。
   const isFinalIntegration = maxTokens >= FINAL_MAX_TOKENS;
+  // Gemini 的 thinking token 跟可見輸出共用同一個 maxOutputTokens 預算：圓桌發言／閒聊這種
+  // 刻意壓低上限的呼叫，thinking 一吃就會把可見文字擠到被截斷（甚至斷在句子中間）。
+  // 這裡額外留一段 thinking 緩衝，可見文字長度仍由 prompt 自己要求的字數控制，不會變長篇大論。
+  const thinkingBuffer = isFinalIntegration ? 0 : 300;
   const body = {
     contents: [{ role: "user", parts: userParts }],
     generationConfig: {
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: maxTokens + thinkingBuffer,
       thinkingConfig: {
         thinkingLevel: isFinalIntegration ? "high" : "low",
       },
