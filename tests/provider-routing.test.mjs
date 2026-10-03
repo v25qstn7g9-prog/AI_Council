@@ -38,3 +38,15 @@ test('Cloudflare outage switches to configured Gemini for both collaborators',as
     assert.equal(result.a,'Gemini 回答');assert.equal(result.b,'Gemini 回答');assert.equal(cloudCalls,1);assert.equal(geminiCalls,2);
   }finally{globalThis.fetch=original;}
 });
+
+test('reviewer failure retains the completed primary answer',async()=>{
+  let count=0;const env={AI:{run:async()=>{if(++count===1)return {response:'主答保留'};throw Error('unavailable');}}};
+  const result=await(await onRequestPost({request:request({}),env})).json();
+  assert.equal(result.a,'主答保留');assert.equal(result.partial,true);assert.match(result.b,/主答已保留/);
+});
+
+test('complete outage gives an error without leaking upstream details',async()=>{
+  const env={AI:{run:async()=>{throw Error('secret=do-not-show');}}};
+  const response=await onRequestPost({request:request({}),env});const result=await response.json();
+  assert.equal(response.status,500);assert(!JSON.stringify(result).includes('do-not-show'));
+});
