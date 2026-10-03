@@ -24,7 +24,7 @@ test('failed primary switches to backup once and preserves the question and hist
     assert.equal(response.status,200);assert.equal(result.a,'備援回答');assert.equal(result.b,'備援回答');
     assert.match(result.labels.a,/備援/);assert.match(result.labels.b,/備援/);assert.equal(requests,1);
     assert(calls[0].input.messages[1].content.includes('請保持繁體中文'));
-    assert.equal(calls[0].input.max_tokens,1800);assert.equal(calls[1].input.max_tokens,1400);
+    assert.equal(calls[0].input.max_tokens,500);assert.equal(calls[1].input.max_tokens,350);
     await onRequestPost({request:request(body),env});assert.equal(requests,2,'new request retries primary');
   }finally{globalThis.fetch=original;}
 });
